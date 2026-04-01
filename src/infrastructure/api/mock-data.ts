@@ -2,13 +2,17 @@
 
 import { FootTrafficData, CommerceData, BusStopData, PropertyInsight } from "@/domain/types";
 
+// 고덕신도시 입주 추이 반영 추정치 (2024~2025)
+// 실제 고덕동 등록인구: 2023년 약 4.2만명 → 2024년 약 5.5만명 → 2025년 약 7만명 예상
 export const MOCK_FOOT_TRAFFIC: FootTrafficData[] = [
-  { areaCode: "4180025000", areaName: "고덕동", date: "2024-01", totalCount: 85000, maleCount: 42000, femaleCount: 43000, age20s: 18000, age30s: 22000, age40s: 19000, age50s: 14000, weekday: "평일" },
-  { areaCode: "4180025000", areaName: "고덕동", date: "2024-02", totalCount: 92000, maleCount: 46000, femaleCount: 46000, age20s: 20000, age30s: 24000, age40s: 21000, age50s: 15000, weekday: "평일" },
-  { areaCode: "4180025000", areaName: "고덕동", date: "2024-03", totalCount: 98000, maleCount: 49000, femaleCount: 49000, age20s: 22000, age30s: 26000, age40s: 22000, age50s: 16000, weekday: "평일" },
-  { areaCode: "4180025000", areaName: "고덕동", date: "2024-04", totalCount: 105000, maleCount: 53000, femaleCount: 52000, age20s: 24000, age30s: 28000, age40s: 24000, age50s: 17000, weekday: "평일" },
-  { areaCode: "4180025000", areaName: "고덕동", date: "2024-05", totalCount: 112000, maleCount: 56000, femaleCount: 56000, age20s: 26000, age30s: 30000, age40s: 25000, age50s: 18000, weekday: "평일" },
-  { areaCode: "4180025000", areaName: "고덕동", date: "2024-06", totalCount: 118000, maleCount: 60000, femaleCount: 58000, age20s: 28000, age30s: 32000, age40s: 26000, age50s: 19000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2024-01", totalCount: 42000, maleCount: 21000, femaleCount: 21000, age20s: 7000, age30s: 14000, age40s: 13000, age50s: 6000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2024-03", totalCount: 46000, maleCount: 23000, femaleCount: 23000, age20s: 8000, age30s: 15000, age40s: 14000, age50s: 7000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2024-06", totalCount: 51000, maleCount: 26000, femaleCount: 25000, age20s: 9000, age30s: 17000, age40s: 15000, age50s: 8000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2024-09", totalCount: 56000, maleCount: 28000, femaleCount: 28000, age20s: 10000, age30s: 19000, age40s: 16000, age50s: 8000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2024-12", totalCount: 61000, maleCount: 31000, femaleCount: 30000, age20s: 11000, age30s: 21000, age40s: 17000, age50s: 9000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2025-01", totalCount: 63000, maleCount: 32000, femaleCount: 31000, age20s: 11000, age30s: 22000, age40s: 18000, age50s: 9000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2025-02", totalCount: 65000, maleCount: 33000, femaleCount: 32000, age20s: 12000, age30s: 22000, age40s: 18000, age50s: 9000, weekday: "평일" },
+  { areaCode: "4180025000", areaName: "고덕동", date: "2025-03", totalCount: 68000, maleCount: 34000, femaleCount: 34000, age20s: 12000, age30s: 23000, age40s: 19000, age50s: 10000, weekday: "평일" },
 ];
 
 export const MOCK_COMMERCE: CommerceData[] = [

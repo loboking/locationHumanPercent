@@ -163,8 +163,8 @@ export default function DashboardPage() {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-1">고덕동 유동인구 추이 (2024)</h3>
-          <p className="text-xs text-amber-500 mb-3">※ 참고용 추정 데이터</p>
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">고덕동 등록인구 유입 추이 (2024~2025)</h3>
+          <p className="text-xs text-amber-500 mb-3">※ 신도시 입주 추이 기반 추정치</p>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={chartData}>
               <defs>
