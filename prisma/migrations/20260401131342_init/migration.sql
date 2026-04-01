@@ -1,14 +1,16 @@
 -- CreateTable
 CREATE TABLE "BusTrafficSnapshot" (
-    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "id" SERIAL NOT NULL,
     "stationId" INTEGER NOT NULL,
     "stationName" TEXT NOT NULL,
     "area" TEXT NOT NULL,
     "routeCount" INTEGER NOT NULL,
     "activeCount" INTEGER NOT NULL,
-    "avgCrowded" REAL NOT NULL,
+    "avgCrowded" DOUBLE PRECISION NOT NULL,
     "score" INTEGER NOT NULL,
-    "recordedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "recordedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "BusTrafficSnapshot_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex

@@ -10,6 +10,8 @@
     "collect": "PUBLIC_DATA_SERVICE_KEY=bc2af5adcbb51a70a19c736313f49382fa90af12fa9d4193df8296b1389769b8 node collector.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "@prisma/adapter-neon": "^7.6.0",
     "@prisma/client": "^6.19.3",
     "clsx": "^2.1.1",
     "lucide-react": "^1.7.0",
