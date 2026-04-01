@@ -183,10 +183,9 @@ export function calcFootTrafficEstimate(
   // 반경 면적 비율 (500m 기준, π×r² 비례)
   const areaFactor = (radius / 500) ** 2;
 
-  // 교통 접근성 (25점): 반경별 만점 기준 버스정류장 수 조정
-  // 500m=5개, 150m≈1개, 1.5K≈45개
-  const busMax = Math.max(1, Math.round(5 * areaFactor));
-  const transitScore = Math.min(Math.round((busStops / busMax) * 25), 25);
+  // 교통 접근성 (25점): 반경 무관 고정 — 버스정류장은 밀도가 아닌 접근성 개념
+  // 1개=5점, 5개 이상=만점 (반경을 넓혀도 같은 정류장이면 동일 점수 유지)
+  const transitScore = Math.min(busStops * 5, 25);
 
   // 상권 활성도 (45점) — 반경 면적에 비례한 만점 기준
   const rMax = Math.max(1, Math.round(30 * areaFactor));  // 500m=30개
