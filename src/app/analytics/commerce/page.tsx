@@ -13,6 +13,18 @@ export default function CommercePage() {
         <p className="text-gray-500 mt-1">고덕동 업종별 월 추정 매출 현황</p>
       </div>
 
+      {/* 추정치 경고 배너 */}
+      <div className="flex items-center justify-center">
+        <div className="flex items-center gap-3 bg-amber-50 border-2 border-amber-400 rounded-2xl px-8 py-4">
+          <span className="text-3xl">⚠️</span>
+          <div className="text-center">
+            <p className="text-xl font-black text-amber-600 tracking-tight">추 정 치</p>
+            <p className="text-xs text-amber-500 mt-0.5">아래 데이터는 실제 매출이 아닌 참고용 추정값입니다</p>
+          </div>
+          <span className="text-3xl">⚠️</span>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">업종별 월 매출 (백만원)</h3>
