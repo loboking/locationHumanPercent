@@ -8,10 +8,11 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Loader2 } from "lucide-react";
 
 // 대시보드 분석 대상 주소
+// 좌표 직접 지정으로 카카오 주소 오인식 방지
 const DASHBOARD_LOCATIONS = [
-  { label: "고덕동", address: "경기도 평택시 고덕동 1896" },
-  { label: "소사동", address: "경기도 평택시 소사동" },
-  { label: "비전동", address: "경기도 평택시 비전동" },
+  { label: "고덕동", lat: 37.0506, lng: 127.0437 },   // 고덕신도시 중심부
+  { label: "소사동", lat: 36.9989, lng: 127.0899 },   // 소사동 주민센터 인근 (평택 구도심)
+  { label: "비전동", lat: 37.0109, lng: 127.1122 },   // 비전동 주민센터
 ];
 
 interface LocationScore {
@@ -34,12 +35,12 @@ export default function DashboardPage() {
       setLoading(true);
       const results = await Promise.allSettled(
         DASHBOARD_LOCATIONS.map(async (loc) => {
-          const res = await fetch(`/api/foot-traffic?address=${encodeURIComponent(loc.address)}&radius=500`);
+          const res = await fetch(`/api/foot-traffic?lat=${loc.lat}&lng=${loc.lng}&radius=500`);
           if (!res.ok) throw new Error("fetch failed");
           const data = await res.json();
           return {
             label: loc.label,
-            address: loc.address,
+            address: `${loc.lat},${loc.lng}`,
             resolvedAddress: data.address,
             score: data.estimate.score,
             grade: data.estimate.grade,
