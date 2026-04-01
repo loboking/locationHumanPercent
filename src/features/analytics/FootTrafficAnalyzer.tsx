@@ -337,10 +337,10 @@ export default function FootTrafficAnalyzer() {
   ] : [];
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-4 md:space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">유동인구 추정 분석</h2>
-        <p className="text-gray-500 mt-1">지도를 클릭하거나 주소를 입력 · 버스정류장 마커를 클릭해 분석합니다</p>
+        <h2 className="text-xl md:text-2xl font-bold text-gray-900">유동인구 추정 분석</h2>
+        <p className="text-gray-500 mt-1 text-sm">지도를 클릭하거나 주소를 입력 · 버스정류장 마커를 클릭해 분석합니다</p>
       </div>
 
       {/* 주소 검색 + 반경 선택 */}
@@ -353,27 +353,27 @@ export default function FootTrafficAnalyzer() {
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && analyze(undefined, undefined, address)}
-              placeholder="예: 경기도 평택시 고덕동 1234"
+              placeholder="예: 평택시 고덕동 1234"
               className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <button
             onClick={() => analyze(undefined, undefined, address)}
             disabled={loading || !address}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 shrink-0"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-            분석
+            <span className="hidden sm:inline">분석</span>
           </button>
           <button
             onClick={() => setShowStationMgr((v) => !v)}
             className={clsx(
-              "flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors",
+              "flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors shrink-0",
               showStationMgr ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:border-blue-300"
             )}
           >
             <Settings size={14} />
-            정류장
+            <span className="hidden sm:inline">정류장</span>
           </button>
         </div>
 
@@ -411,10 +411,10 @@ export default function FootTrafficAnalyzer() {
           <div className="space-y-1.5 max-h-40 overflow-y-auto">
             {stations.map((s) => (
               <div key={s.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
-                <span className="text-gray-800">{s.name} <span className="text-xs text-gray-400">({s.area})</span></span>
+                <span className="text-gray-800 truncate">{s.name} <span className="text-xs text-gray-400">({s.area})</span></span>
                 <button
                   onClick={() => handleDeleteStation(s.id)}
-                  className="text-red-400 hover:text-red-600 ml-2"
+                  className="text-red-400 hover:text-red-600 ml-2 shrink-0"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -423,54 +423,56 @@ export default function FootTrafficAnalyzer() {
           </div>
           <div className="border-t border-gray-100 pt-3">
             <p className="text-xs text-gray-500 mb-2">새 정류장 추가</p>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 placeholder="이름"
                 value={newStation.name}
                 onChange={(e) => setNewStation((v) => ({ ...v, name: e.target.value }))}
                 className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
-              <input
-                placeholder="위도(lat)"
-                value={newStation.lat}
-                onChange={(e) => setNewStation((v) => ({ ...v, lat: e.target.value }))}
-                className="w-24 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-              <input
-                placeholder="경도(lng)"
-                value={newStation.lng}
-                onChange={(e) => setNewStation((v) => ({ ...v, lng: e.target.value }))}
-                className="w-24 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-              <button
-                onClick={handleAddStation}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700"
-              >
-                <Plus size={12} />
-                추가
-              </button>
+              <div className="flex gap-2">
+                <input
+                  placeholder="위도(lat)"
+                  value={newStation.lat}
+                  onChange={(e) => setNewStation((v) => ({ ...v, lat: e.target.value }))}
+                  className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+                <input
+                  placeholder="경도(lng)"
+                  value={newStation.lng}
+                  onChange={(e) => setNewStation((v) => ({ ...v, lng: e.target.value }))}
+                  className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+                <button
+                  onClick={handleAddStation}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 shrink-0"
+                >
+                  <Plus size={12} />
+                  추가
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* 지도 */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 text-sm text-gray-500 flex items-center gap-2">
-            <span>지도 클릭 또는 🚌 파란 마커(모니터링 정류장) 클릭 → 분석</span>
-            <span className="text-xs text-orange-500">🚏 주황=실제 버스정류장</span>
+          <div className="px-4 py-2.5 border-b border-gray-100 text-xs text-gray-500 flex flex-wrap items-center gap-1.5">
+            <span>지도 클릭 또는 🚌 파란 마커 클릭 → 분석</span>
+            <span className="text-orange-500">🚏 주황=버스정류장</span>
           </div>
           <Script
             src={`//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_KEY}&autoload=false`}
             strategy="afterInteractive"
             onLoad={initMap}
           />
-          <div ref={mapRef} className="w-full" style={{ height: "calc(100vh - 260px)", minHeight: "520px" }} />
+          <div ref={mapRef} className="w-full" style={{ height: "clamp(280px, 45vw, 520px)" }} />
         </div>
 
         {/* 결과 */}
-        <div suppressHydrationWarning className="space-y-4 overflow-y-auto pr-1" style={{ maxHeight: "calc(100vh - 220px)" }}>
+        <div suppressHydrationWarning className="space-y-4 overflow-y-auto pr-0.5" style={{ maxHeight: "clamp(400px, 80vh, 760px)" }}>
           {loading && (
             <div className="bg-white rounded-xl border border-gray-200 p-8 flex items-center justify-center gap-3 text-gray-400">
               <Loader2 size={20} className="animate-spin" />

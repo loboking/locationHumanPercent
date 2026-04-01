@@ -7,6 +7,17 @@ import clsx from "clsx";
 
 const NAV_ITEMS = [
   { href: "/", label: "대시보드", icon: LayoutDashboard },
+  { href: "/analytics/foottraffic", label: "유동인구", icon: BarChart2 },
+  { href: "/analytics/commerce", label: "상권", icon: MapPin },
+  { href: "/analytics/transport", label: "교통", icon: Bus },
+  { href: "/analytics/bus-history", label: "이력", icon: History },
+  { href: "/api-guide", label: "API", icon: Key },
+  { href: "/settings", label: "설정", icon: Settings },
+];
+
+// 데스크탑에서 보여줄 전체 메뉴
+const FULL_NAV_ITEMS = [
+  { href: "/", label: "대시보드", icon: LayoutDashboard },
   { href: "/api-guide", label: "API 신청 가이드", icon: Key },
   { href: "/analytics/foottraffic", label: "유동인구 추정", icon: BarChart2 },
   { href: "/analytics/commerce", label: "상권 매출 분석", icon: MapPin },
@@ -19,39 +30,61 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-64 min-h-screen bg-gray-900 text-white flex flex-col">
-      <div className="p-6 border-b border-gray-700">
-        <h1 className="text-lg font-bold text-white">평택 부동산 인사이트</h1>
-        <p className="text-xs text-gray-400 mt-1">SaaS Analytics Platform</p>
-      </div>
+    <>
+      {/* 데스크탑 사이드바 */}
+      <aside className="hidden md:flex w-56 lg:w-64 min-h-screen bg-gray-900 text-white flex-col shrink-0">
+        <div className="p-5 lg:p-6 border-b border-gray-700">
+          <h1 className="text-base lg:text-lg font-bold text-white">평택 부동산 인사이트</h1>
+          <p className="text-xs text-gray-400 mt-1">SaaS Analytics Platform</p>
+        </div>
 
-      <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-3 lg:p-4 space-y-1">
+          {FULL_NAV_ITEMS.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={clsx(
+                "flex items-center gap-3 px-3 lg:px-4 py-2.5 lg:py-3 rounded-lg text-sm font-medium transition-colors",
+                pathname === href
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
+              )}
+            >
+              <Icon size={17} />
+              <span className="truncate">{label}</span>
+            </Link>
+          ))}
+        </nav>
+
+        <div className="p-3 lg:p-4 border-t border-gray-700">
+          <div className="bg-gray-800 rounded-lg p-3">
+            <p className="text-xs text-gray-400">수집 중</p>
+            <div className="mt-2 h-1.5 bg-gray-700 rounded-full">
+              <div className="h-1.5 bg-emerald-500 rounded-full w-3/5" />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">버스 데이터 실시간 수집 중</p>
+          </div>
+        </div>
+      </aside>
+
+      {/* 모바일 하단 탭바 */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-gray-900 border-t border-gray-700 flex">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
             className={clsx(
-              "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors",
+              "flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-[10px] font-medium transition-colors min-w-0",
               pathname === href
-                ? "bg-blue-600 text-white"
-                : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                ? "text-blue-400"
+                : "text-gray-500 hover:text-gray-300"
             )}
           >
-            <Icon size={18} />
-            {label}
+            <Icon size={19} />
+            <span className="truncate w-full text-center leading-tight">{label}</span>
           </Link>
         ))}
       </nav>
-
-      <div className="p-4 border-t border-gray-700">
-        <div className="bg-gray-800 rounded-lg p-3">
-          <p className="text-xs text-gray-400">수집 중</p>
-          <div className="mt-2 h-1.5 bg-gray-700 rounded-full">
-            <div className="h-1.5 bg-emerald-500 rounded-full w-3/5" />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">버스 데이터 실시간 수집 중</p>
-        </div>
-      </div>
-    </aside>
+    </>
   );
 }

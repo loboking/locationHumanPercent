@@ -59,22 +59,22 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">평택시 부동산 인사이트</h2>
-        <p className="text-gray-500 mt-1">고덕동 · 소사동 · 비전동 실시간 분석 현황</p>
+        <h2 className="text-xl md:text-2xl font-bold text-gray-900">평택시 부동산 인사이트</h2>
+        <p className="text-gray-500 mt-1 text-sm">고덕동 · 소사동 · 비전동 실시간 분석 현황</p>
       </div>
 
       {/* Score Cards */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">지역별 종합 점수</h3>
+        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">지역별 종합 점수</h3>
         {loading ? (
           <div className="flex items-center gap-2 text-gray-400 text-sm py-6">
             <Loader2 size={16} className="animate-spin" />
             실시간 데이터 분석 중...
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
             {scores.map((s) => (
               <ScoreCard
                 key={s.label}
@@ -91,7 +91,7 @@ export default function DashboardPage() {
       {/* 카카오맵 */}
       {scores.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-100">
+          <div className="px-4 md:px-5 py-3 md:py-4 border-b border-gray-100">
             <h3 className="text-sm font-semibold text-gray-700">평택시 분석 지역 지도</h3>
             <p className="text-xs text-gray-400 mt-0.5">마커를 클릭하면 상세 점수를 확인합니다</p>
           </div>
@@ -104,45 +104,80 @@ export default function DashboardPage() {
               title: s.label,
               score: s.score,
             }))}
-            className="w-full h-[350px]"
+            className="w-full h-[240px] md:h-[350px]"
           />
         </div>
       )}
 
-      {/* 세부 점수 테이블 */}
+      {/* 세부 점수 - 모바일: 카드, 데스크탑: 테이블 */}
       {scores.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-100">
+          <div className="px-4 md:px-5 py-3 md:py-4 border-b border-gray-100">
             <h3 className="text-sm font-semibold text-gray-700">항목별 점수 비교</h3>
           </div>
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                {["지역", "교통 접근성 /25", "상권 활성도 /45", "주거 밀도 /30", "종합 /100", "등급"].map((h) => (
-                  <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {scores.map((s) => (
-                <tr key={s.label} className="hover:bg-gray-50">
-                  <td className="px-5 py-3 font-semibold text-gray-900">{s.label}</td>
-                  <td className="px-5 py-3 text-blue-600 font-medium">{s.detail.transitScore}</td>
-                  <td className="px-5 py-3 text-violet-600 font-medium">{s.detail.commerceScore}</td>
-                  <td className="px-5 py-3 text-emerald-600 font-medium">{s.detail.residentialScore}</td>
-                  <td className="px-5 py-3 font-bold text-gray-900">{s.score}</td>
-                  <td className="px-5 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                      s.grade === "매우높음" ? "bg-red-100 text-red-700" :
-                      s.grade === "높음" ? "bg-orange-100 text-orange-700" :
-                      s.grade === "보통" ? "bg-yellow-100 text-yellow-700" :
-                      "bg-gray-100 text-gray-500"
-                    }`}>{s.grade}</span>
-                  </td>
+
+          {/* 모바일 카드 뷰 */}
+          <div className="md:hidden divide-y divide-gray-100">
+            {scores.map((s) => (
+              <div key={s.label} className="px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-gray-900">{s.label}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                    s.grade === "매우높음" ? "bg-red-100 text-red-700" :
+                    s.grade === "높음" ? "bg-orange-100 text-orange-700" :
+                    s.grade === "보통" ? "bg-yellow-100 text-yellow-700" :
+                    "bg-gray-100 text-gray-500"
+                  }`}>{s.grade} · {s.score}점</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-blue-50 rounded-lg p-2 text-center">
+                    <p className="text-blue-500">교통</p>
+                    <p className="font-bold text-blue-700 text-base">{s.detail.transitScore}<span className="text-xs font-normal">/25</span></p>
+                  </div>
+                  <div className="bg-violet-50 rounded-lg p-2 text-center">
+                    <p className="text-violet-500">상권</p>
+                    <p className="font-bold text-violet-700 text-base">{s.detail.commerceScore}<span className="text-xs font-normal">/45</span></p>
+                  </div>
+                  <div className="bg-emerald-50 rounded-lg p-2 text-center">
+                    <p className="text-emerald-500">주거</p>
+                    <p className="font-bold text-emerald-700 text-base">{s.detail.residentialScore}<span className="text-xs font-normal">/30</span></p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* 데스크탑 테이블 뷰 */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  {["지역", "교통 접근성 /25", "상권 활성도 /45", "주거 밀도 /30", "종합 /100", "등급"].map((h) => (
+                    <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {scores.map((s) => (
+                  <tr key={s.label} className="hover:bg-gray-50">
+                    <td className="px-5 py-3 font-semibold text-gray-900">{s.label}</td>
+                    <td className="px-5 py-3 text-blue-600 font-medium">{s.detail.transitScore}</td>
+                    <td className="px-5 py-3 text-violet-600 font-medium">{s.detail.commerceScore}</td>
+                    <td className="px-5 py-3 text-emerald-600 font-medium">{s.detail.residentialScore}</td>
+                    <td className="px-5 py-3 font-bold text-gray-900">{s.score}</td>
+                    <td className="px-5 py-3">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        s.grade === "매우높음" ? "bg-red-100 text-red-700" :
+                        s.grade === "높음" ? "bg-orange-100 text-orange-700" :
+                        s.grade === "보통" ? "bg-yellow-100 text-yellow-700" :
+                        "bg-gray-100 text-gray-500"
+                      }`}>{s.grade}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
