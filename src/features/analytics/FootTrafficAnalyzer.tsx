@@ -224,13 +224,14 @@ export default function FootTrafficAnalyzer() {
     }
   }, [drawCircle, drawBusStopMarkers]);
 
-  // 반경 변경 시 원 재생성
+  // 반경 변경 시 원 재생성 + 자동 재분석 (기존 위치 있을 때)
   useEffect(() => {
     radiusRef.current = radius;
     if (lastAnalyzedPos.current && mapInstance.current) {
       drawCircle(lastAnalyzedPos.current.lat, lastAnalyzedPos.current.lng, radius);
+      analyze(lastAnalyzedPos.current.lat, lastAnalyzedPos.current.lng, undefined, radius);
     }
-  }, [radius, drawCircle]);
+  }, [radius]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 스테이션 마커
   const addStationMarkers = useCallback((stationList: Station[]) => {
