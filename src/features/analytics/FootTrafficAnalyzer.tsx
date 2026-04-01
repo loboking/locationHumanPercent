@@ -23,11 +23,9 @@ interface Station {
 }
 
 const RADIUS_OPTIONS = [
-  { value: 150,  label: "150m" },
   { value: 300,  label: "300m" },
   { value: 500,  label: "500m" },
   { value: 1000, label: "1K" },
-  { value: 1500, label: "1.5K" },
 ] as const;
 
 interface EstimateResult {
@@ -101,7 +99,7 @@ export default function FootTrafficAnalyzer() {
   const stationsRef = useRef<Station[]>([]);
 
   const [address, setAddress] = useState("");
-  const [radius, setRadius] = useState(500);
+  const [radius, setRadius] = useState<300 | 500 | 1000>(500);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [error, setError] = useState("");
