@@ -31,6 +31,7 @@ interface EstimateResult {
   address: string;
   coordinates: { lat: number; lng: number };
   radius: number;
+  busStopSource: "kakao" | "fallback";
   estimate: {
     score: number;
     grade: string;
@@ -543,11 +544,11 @@ export default function FootTrafficAnalyzer() {
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
-                    { icon: Bus, label: "버스 정류장", value: result.estimate.busStopCount, color: "text-blue-600 bg-blue-50" },
-                    { icon: Utensils, label: "음식점", value: result.estimate.restaurantCount, color: "text-orange-600 bg-orange-50" },
-                    { icon: Coffee, label: "카페", value: result.estimate.cafeCount, color: "text-amber-600 bg-amber-50" },
-                    { icon: ShoppingBag, label: "편의점", value: result.estimate.convStoreCount, color: "text-emerald-600 bg-emerald-50" },
-                  ].map(({ icon: Icon, label, value, color }) => (
+                    { icon: Bus, label: "버스 정류장", value: result.estimate.busStopCount, color: "text-blue-600 bg-blue-50", noKakao: result.busStopSource === "fallback" },
+                    { icon: Utensils, label: "음식점", value: result.estimate.restaurantCount, color: "text-orange-600 bg-orange-50", noKakao: false },
+                    { icon: Coffee, label: "카페", value: result.estimate.cafeCount, color: "text-amber-600 bg-amber-50", noKakao: false },
+                    { icon: ShoppingBag, label: "편의점", value: result.estimate.convStoreCount, color: "text-emerald-600 bg-emerald-50", noKakao: false },
+                  ].map(({ icon: Icon, label, value, color, noKakao }) => (
                     <div key={label} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2.5">
                       <div className={clsx("p-1 rounded-lg", color.split(" ")[1])}>
                         <Icon size={14} className={color.split(" ")[0]} />
@@ -555,6 +556,9 @@ export default function FootTrafficAnalyzer() {
                       <div>
                         <p className="text-xs text-gray-500">{label}</p>
                         <p className="font-bold text-gray-900 text-sm">{value}개</p>
+                        {noKakao && (
+                          <p className="text-xs text-amber-500 mt-0.5">카카오 미등록 지역</p>
+                        )}
                       </div>
                     </div>
                   ))}

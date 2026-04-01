@@ -76,6 +76,7 @@ export async function GET(req: NextRequest) {
   ]);
 
   // 버스정류장 폴백: Kakao 미인덱스 지역은 PYEONGTAEK_STATIONS 거리 계산
+  const kakaoHasBusData = busResult.totalCount > 0;
   let busStopCount = busResult.totalCount;
   const stationsInRadius = PYEONGTAEK_STATIONS.filter((s) => {
     const coord = STATION_COORDS[s.id];
@@ -133,6 +134,7 @@ export async function GET(req: NextRequest) {
     coordinates: { lat, lng },
     radius,
     estimate,
+    busStopSource: kakaoHasBusData ? "kakao" : "fallback",
     nearby: {
       busStops: [
         ...busResult.places.slice(0, 3).map((s) => ({ name: s.placeName, distance: s.distance, lat: s.lat, lng: s.lng })),
