@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   const latParam = searchParams.get("lat");
   const lngParam = searchParams.get("lng");
   const radiusParam = parseInt(searchParams.get("radius") ?? "500", 10);
-  const radius = [300, 500, 1000].includes(radiusParam) ? radiusParam : 500;
+  const radius = [500, 1000].includes(radiusParam) ? radiusParam : 500;
 
   let lat: number, lng: number, resolvedAddress: string;
 
