@@ -11,6 +11,7 @@ const BASE_URL = "https://apis.data.go.kr/6410000/busarrivalservice/v2";
 
 const STATIONS = [
   { id: 233000375, name: "고덕신도시입구", area: "고덕동" },
+  { id: 233000510, name: "고덕면사무소",   area: "고덕동" },
   { id: 233001200, name: "평택역",         area: "평택동" },
   { id: 233001500, name: "평택시청",       area: "평택동" },
   { id: 233002100, name: "비전동주민센터", area: "비전동" },
@@ -71,6 +72,13 @@ collect();
 
 // 매 정시마다 실행 (0분 0초)
 cron.schedule("0 * * * *", collect, { timezone: "Asia/Seoul" });
+
+const shutdown = async () => {
+  await prisma.$disconnect();
+  process.exit(0);
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 console.log("📡 버스 교통량 수집기 시작 - 매 정시마다 실행");
 console.log("   종료: Ctrl+C\n");

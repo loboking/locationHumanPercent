@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "collect": "PUBLIC_DATA_SERVICE_KEY=bc2af5adcbb51a70a19c736313f49382fa90af12fa9d4193df8296b1389769b8 node collector.mjs"
+    "collect": "node collector.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

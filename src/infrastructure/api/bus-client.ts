@@ -42,9 +42,13 @@ export async function fetchBusArrivals(stationId: number): Promise<BusArrival[]>
     next: { revalidate: 60 }, // 1분 캐시 (실시간)
   });
 
-  if (!res.ok) throw new Error(`버스 API 오류: ${res.status}`);
+  if (!res.ok) throw new Error(`버스 API HTTP 오류: ${res.status}`);
   const data: BusArrivalResponse = await res.json();
-  return data.response.msgBody.busArrivalList ?? [];
+  const resultCode = data.response?.msgHeader?.resultCode;
+  if (resultCode !== 0) {
+    throw new Error(`버스 API 오류: ${resultCode} - ${data.response?.msgHeader?.resultMessage}`);
+  }
+  return data.response.msgBody?.busArrivalList ?? [];
 }
 
 // 교통량 지수 계산 (버스 배차 수 + 혼잡도 기반)
@@ -79,7 +83,7 @@ export function calcTrafficIndex(arrivals: BusArrival[]): {
 // 평택시 주요 정류장 목록
 export const PYEONGTAEK_STATIONS = [
   { id: 233000375, name: "고덕신도시입구", area: "고덕동" },
-  { id: 233000510, name: "고덕면사무소", area: "고덕동" },
+  { id: 233000510, name: "고덕동1896번지", area: "고덕동" },
   { id: 233001200, name: "평택역", area: "평택동" },
   { id: 233001500, name: "평택시청", area: "평택동" },
   { id: 233002100, name: "비전동주민센터", area: "비전동" },

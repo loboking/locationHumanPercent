@@ -16,7 +16,6 @@ interface StationHistory {
   maxScore: number;
   dataCount: number;
   hourlyAvg: { hour: number; score: number }[];
-  raw: { score: number; routeCount: number; recordedAt: string }[];
 }
 
 interface HistoryResponse {
@@ -54,25 +53,8 @@ export default function BusHistoryPage() {
     return row;
   });
 
-  // 시간순 추이 차트 (raw 데이터)
-  const trendData = (() => {
-    if (!data?.stations.length) return [];
-    const allTimes = new Set(
-      data.stations.flatMap((s) => s.raw.map((r) => r.recordedAt))
-    );
-    return Array.from(allTimes)
-      .sort()
-      .map((t) => {
-        const row: Record<string, string | number> = {
-          time: new Date(t).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }),
-        };
-        data.stations.forEach((s) => {
-          const found = s.raw.find((r) => r.recordedAt === t);
-          if (found) row[s.name] = found.score;
-        });
-        return row;
-      });
-  })();
+  // 수집 횟수 기반 데이터 충분 여부 (raw 제거: API가 raw를 반환하지 않음)
+  const totalDataCount = data?.stations.reduce((sum, s) => sum + s.dataCount, 0) ?? 0;
 
   return (
     <div className="p-8 space-y-8">
@@ -130,17 +112,17 @@ export default function BusHistoryPage() {
         </div>
       ) : (
         <>
-          {/* 시간순 추이 */}
-          {trendData.length > 1 && (
+          {/* 시간순 추이: 수집 데이터 충분 시 hourlyAvg 기반 표시 */}
+          {totalDataCount > 1 && data.stations.some((s) => s.hourlyAvg.length > 0) && (
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4">
                 <TrendingUp size={14} className="inline mr-1" />
-                교통량 지수 추이
+                교통량 지수 추이 (시간대별 평균)
               </h3>
               <ResponsiveContainer width="100%" height={240}>
-                <LineChart data={trendData}>
+                <LineChart data={hourlyChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="time" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                  <XAxis dataKey="hour" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
                   <Tooltip />
                   <Legend />
@@ -183,7 +165,7 @@ export default function BusHistoryPage() {
           )}
 
           {/* 데이터 적을 때 안내 */}
-          {trendData.length <= 1 && (
+          {totalDataCount <= 1 && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-700">
               수집된 시점이 1회입니다. 데이터가 쌓일수록 추이 그래프가 표시됩니다.
               <br />매 정시마다 자동 수집 중 — 내일이면 24개 데이터 포인트가 생깁니다.

@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+const VALID_PERIODS = ["day", "week", "month"] as const;
+type Period = typeof VALID_PERIODS[number];
+
 // GET /api/bus-history?period=day|week|month&stationId=233000375
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const period = searchParams.get("period") ?? "week";
-  const stationId = searchParams.get("stationId");
+  const period = (searchParams.get("period") ?? "week") as Period;
+  const stationIdParam = searchParams.get("stationId");
+
+  if (!VALID_PERIODS.includes(period)) {
+    return NextResponse.json({ error: "period는 day, week, month 중 하나여야 합니다" }, { status: 400 });
+  }
+
+  let stationId: number | null = null;
+  if (stationIdParam) {
+    stationId = parseInt(stationIdParam, 10);
+    if (isNaN(stationId) || stationId <= 0) {
+      return NextResponse.json({ error: "유효하지 않은 stationId" }, { status: 400 });
+    }
+  }
 
   const since = new Date();
   if (period === "day")   since.setDate(since.getDate() - 1);
@@ -14,12 +29,22 @@ export async function GET(req: NextRequest) {
 
   const where = {
     recordedAt: { gte: since },
-    ...(stationId ? { stationId: parseInt(stationId) } : {}),
+    ...(stationId ? { stationId } : {}),
   };
 
   const snapshots = await prisma.busTrafficSnapshot.findMany({
     where,
     orderBy: { recordedAt: "asc" },
+    select: {
+      stationId: true,
+      stationName: true,
+      area: true,
+      score: true,
+      routeCount: true,
+      activeCount: true,
+      avgCrowded: true,
+      recordedAt: true,
+    },
   });
 
   // 정류장별 그룹
@@ -29,7 +54,7 @@ export async function GET(req: NextRequest) {
     grouped[s.stationName].push(s);
   }
 
-  // 정류장별 시간대 평균
+  // 정류장별 시간대 평균 (raw 제거)
   const stations = Object.entries(grouped).map(([name, data]) => {
     const avgScore = Math.round(data.reduce((s, d) => s + d.score, 0) / data.length);
     const maxScore = Math.max(...data.map((d) => d.score));
@@ -43,8 +68,10 @@ export async function GET(req: NextRequest) {
       };
     }).filter((h) => h.score !== null);
 
-    return { name, avgScore, maxScore, dataCount: data.length, hourlyAvg, raw: data };
+    return { name, avgScore, maxScore, dataCount: data.length, hourlyAvg };
   });
 
-  return NextResponse.json({ period, since, stations });
+  return NextResponse.json({ period, since, stations }, {
+    headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600" },
+  });
 }

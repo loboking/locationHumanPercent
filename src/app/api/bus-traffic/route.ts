@@ -10,9 +10,11 @@ export async function GET() {
     })
   );
 
-  const data = results
-    .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled")
-    .map((r) => r.value);
+  // 실패한 정류장도 0점으로 포함 (5개 전체 표시)
+  const data = results.map((r, i) => {
+    if (r.status === "fulfilled") return r.value;
+    return { ...PYEONGTAEK_STATIONS[i], score: 0, routeCount: 0, activeCount: 0, avgCrowded: 0, grade: "낮음", arrivals: [] };
+  });
 
   return NextResponse.json({ stations: data, queriedAt: new Date().toISOString() });
 }

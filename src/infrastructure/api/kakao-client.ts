@@ -16,6 +16,7 @@ export async function addressToCoords(address: string): Promise<KakaoCoords | nu
     `${BASE}/v2/local/search/address.json?query=${encodeURIComponent(address)}`,
     { headers: { Authorization: `KakaoAK ${REST_KEY}` } }
   );
+  if (!res.ok) throw new Error(`카카오 주소검색 API 오류: ${res.status}`);
   const data = await res.json();
   const doc = data.documents?.[0];
   if (!doc) return null;
@@ -68,13 +69,73 @@ export async function searchNearbyCount(
 }
 
 // 반경 내 버스정류장 검색 - total_count 반환
+// 경기도는 "버스정류소", 서울/기타는 "버스정류장" 혼용 → 두 쿼리 합산
 export async function searchBusStopsCount(
   lat: number,
   lng: number,
   radius = 500
 ): Promise<{ totalCount: number; places: KakaoPlace[] }> {
+  const commonParams = {
+    x: String(lng),
+    y: String(lat),
+    radius: String(radius),
+    size: "15",
+  };
+
+  const [res1, res2] = await Promise.all([
+    fetch(`${BASE}/v2/local/search/keyword.json?${new URLSearchParams({ ...commonParams, query: "버스정류소" })}`, {
+      headers: { Authorization: `KakaoAK ${REST_KEY}` },
+    }),
+    fetch(`${BASE}/v2/local/search/keyword.json?${new URLSearchParams({ ...commonParams, query: "버스정류장" })}`, {
+      headers: { Authorization: `KakaoAK ${REST_KEY}` },
+    }),
+  ]);
+
+  const [d1, d2] = await Promise.all([res1.json(), res2.json()]);
+
+  const toPlace = (d: any): KakaoPlace => ({
+    id: d.id,
+    placeName: d.place_name,
+    categoryName: d.category_name,
+    lat: parseFloat(d.y),
+    lng: parseFloat(d.x),
+    distance: parseInt(d.distance),
+  });
+
+  const places1: KakaoPlace[] = (d1.documents ?? []).map(toPlace);
+  const places2: KakaoPlace[] = (d2.documents ?? []).map(toPlace);
+
+  // 중복 제거 (같은 id)
+  const seen = new Set(places1.map((p) => p.id));
+  const merged = [...places1, ...places2.filter((p) => !seen.has(p.id))];
+  merged.sort((a, b) => a.distance - b.distance);
+
+  const totalCount = (d1.meta?.total_count ?? 0) + (d2.meta?.total_count ?? 0);
+
+  return { totalCount, places: merged };
+}
+
+// 좌표 → 법정동코드 변환
+export async function getRegionCode(lat: number, lng: number): Promise<string | null> {
+  const params = new URLSearchParams({ x: String(lng), y: String(lat) });
+  const res = await fetch(`${BASE}/v2/local/geo/coord2regioncode.json?${params}`, {
+    headers: { Authorization: `KakaoAK ${REST_KEY}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const bCode = (data.documents ?? []).find((d: any) => d.region_type === "B");
+  return bCode?.code ?? null;
+}
+
+// 반경 내 아파트 단지 검색 (주거 밀도 추정용)
+// 국토교통부 API는 단건조회 전용이라 Kakao 키워드 검색으로 대체
+export async function searchApartmentCount(
+  lat: number,
+  lng: number,
+  radius = 500
+): Promise<{ totalCount: number; complexes: { name: string; distance: number }[] }> {
   const params = new URLSearchParams({
-    query: "버스정류장",
+    query: "아파트",
     x: String(lng),
     y: String(lat),
     radius: String(radius),
@@ -83,21 +144,19 @@ export async function searchBusStopsCount(
   const res = await fetch(`${BASE}/v2/local/search/keyword.json?${params}`, {
     headers: { Authorization: `KakaoAK ${REST_KEY}` },
   });
+  if (!res.ok) return { totalCount: 0, complexes: [] };
   const data = await res.json();
+  const complexes = (data.documents ?? [])
+    .filter((d: any) => d.category_name?.includes("아파트"))
+    .map((d: any) => ({ name: d.place_name as string, distance: parseInt(d.distance) }));
   return {
     totalCount: data.meta?.total_count ?? 0,
-    places: (data.documents ?? []).map((d: any) => ({
-      id: d.id,
-      placeName: d.place_name,
-      categoryName: d.category_name,
-      lat: parseFloat(d.y),
-      lng: parseFloat(d.x),
-      distance: parseInt(d.distance),
-    })),
+    complexes,
   };
 }
 
-// 유동인구 추정 점수 계산 (total_count 기반)
+// 유동인구 추정 점수 계산
+// 교통(25점) + 상권(45점) + 주거(30점) = 100점
 export interface FootTrafficEstimate {
   score: number;
   grade: "매우높음" | "높음" | "보통" | "낮음";
@@ -105,9 +164,11 @@ export interface FootTrafficEstimate {
   restaurantCount: number;
   cafeCount: number;
   convStoreCount: number;
+  totalHouseholds: number;
   detail: {
     transitScore: number;
     commerceScore: number;
+    residentialScore: number;
   };
 }
 
@@ -115,19 +176,25 @@ export function calcFootTrafficEstimate(
   busStops: number,
   restaurants: number,
   cafes: number,
-  convStores: number
+  convStores: number,
+  aptComplexCount = 0  // 아파트 단지 수
 ): FootTrafficEstimate {
-  // 교통 접근성 (40점): 버스정류장 1개=8점, 5개 이상이면 만점
-  const transitScore = Math.min(busStops * 8, 40);
+  // 교통 접근성 (25점): 버스정류장 1개=5점, 5개=만점
+  const transitScore = Math.min(busStops * 5, 25);
 
-  // 상권 활성도 (60점): 로그 스케일 적용
-  // 음식점 기준: 50개=만점, 카페: 30개=만점, 편의점: 10개=만점
-  const rScore = Math.min((restaurants / 50) * 25, 25);
-  const cScore = Math.min((cafes / 30) * 20, 20);
-  const sScore = Math.min((convStores / 10) * 15, 15);
+  // 상권 활성도 (45점) — 교외/신도시 기준 완화
+  const rScore = Math.min((restaurants / 30) * 20, 20);  // 30개=만점 (기존 50개)
+  const cScore = Math.min((cafes / 20) * 15, 15);        // 20개=만점 (기존 30개)
+  const sScore = Math.min((convStores / 7) * 10, 10);    // 7개=만점 (기존 10개)
   const commerceScore = Math.round(rScore + cScore + sScore);
 
-  const score = Math.round(transitScore + commerceScore);
+  // 주거 밀도 (30점): 반경 내 아파트 단지 수 기준
+  // 10개 단지 이상 = 만점 (신도시/교외 기준)
+  const residentialScore = Math.min(Math.round((aptComplexCount / 10) * 30), 30);
+  // 세대수 추정 (단지당 평균 700세대)
+  const totalHouseholds = aptComplexCount * 700;
+
+  const score = Math.min(Math.round(transitScore + commerceScore + residentialScore), 100);
 
   const grade =
     score >= 70 ? "매우높음" :
@@ -141,6 +208,7 @@ export function calcFootTrafficEstimate(
     restaurantCount: restaurants,
     cafeCount: cafes,
     convStoreCount: convStores,
-    detail: { transitScore, commerceScore },
+    totalHouseholds,
+    detail: { transitScore, commerceScore, residentialScore },
   };
 }
