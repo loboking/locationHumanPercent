@@ -48,7 +48,9 @@ export async function fetchBusArrivals(stationId: number): Promise<BusArrival[]>
   if (resultCode !== 0) {
     throw new Error(`버스 API 오류: ${resultCode} - ${data.response?.msgHeader?.resultMessage}`);
   }
-  return data.response.msgBody?.busArrivalList ?? [];
+  const list = data.response.msgBody?.busArrivalList ?? [];
+  // 단일 결과일 때 객체로 반환되는 API 특성 처리
+  return Array.isArray(list) ? list : [list];
 }
 
 // 교통량 지수 계산 (버스 배차 수 + 혼잡도 기반)
