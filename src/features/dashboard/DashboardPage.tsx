@@ -49,11 +49,11 @@ export default function DashboardPage() {
           } satisfies LocationScore;
         })
       );
-      setScores(
-        results
-          .filter((r): r is PromiseFulfilledResult<LocationScore> => r.status === "fulfilled")
-          .map((r) => r.value)
-      );
+      const fulfilled: LocationScore[] = [];
+      for (const r of results) {
+        if (r.status === "fulfilled") fulfilled.push(r.value);
+      }
+      setScores(fulfilled);
       setLoading(false);
     };
     fetchAll();
