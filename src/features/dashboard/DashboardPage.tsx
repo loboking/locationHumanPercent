@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MOCK_FOOT_TRAFFIC, MOCK_COMMERCE } from "@/infrastructure/api/mock-data";
 import ScoreCard from "@/components/ui/ScoreCard";
 import KakaoMap from "@/components/ui/KakaoMap";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from "recharts";
 import { Loader2 } from "lucide-react";
 
 // 대시보드 분석 대상 주소
@@ -59,19 +57,6 @@ export default function DashboardPage() {
     };
     fetchAll();
   }, []);
-
-  const chartData = MOCK_FOOT_TRAFFIC.map((d) => ({
-    month: d.date,
-    유동인구: d.totalCount,
-    남성: d.maleCount,
-    여성: d.femaleCount,
-  }));
-
-  const commerceData = MOCK_COMMERCE.map((d) => ({
-    category: d.category,
-    매출: Math.round(d.monthlyRevenue / 1000000),
-    점포수: d.storeCount,
-  }));
 
   return (
     <div className="p-8 space-y-8">
@@ -161,43 +146,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-1">고덕동 등록인구 유입 추이 (2024~2025)</h3>
-          <p className="text-xs text-amber-500 mb-3">※ 신도시 입주 추이 기반 추정치</p>
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 10000).toFixed(0)}만`} />
-              <Tooltip formatter={(v) => `${Number(v).toLocaleString()}명`} />
-              <Area type="monotone" dataKey="유동인구" stroke="#3b82f6" fill="url(#colorTotal)" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-1">업종별 월 매출 (단위: 백만원)</h3>
-          <p className="text-xs text-amber-500 mb-3">※ 참고용 추정 데이터</p>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={commerceData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="category" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="매출" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
     </div>
   );
 }
