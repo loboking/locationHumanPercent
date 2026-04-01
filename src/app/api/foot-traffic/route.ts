@@ -124,7 +124,8 @@ export async function GET(req: NextRequest) {
     restaurantResult.totalCount,
     cafeResult.totalCount,
     convResult.totalCount,
-    aptResult.totalCount   // 아파트 단지 수
+    aptResult.totalCount,  // 아파트 단지 수
+    radius                 // 반경 전달 → 만점 기준 동적 조정
   );
 
   return NextResponse.json({

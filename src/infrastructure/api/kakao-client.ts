@@ -177,20 +177,29 @@ export function calcFootTrafficEstimate(
   restaurants: number,
   cafes: number,
   convStores: number,
-  aptComplexCount = 0  // 아파트 단지 수
+  aptComplexCount = 0,  // 아파트 단지 수
+  radius = 500          // 분석 반경 (m)
 ): FootTrafficEstimate {
-  // 교통 접근성 (25점): 버스정류장 1개=5점, 5개=만점
-  const transitScore = Math.min(busStops * 5, 25);
+  // 반경 면적 비율 (500m 기준, π×r² 비례)
+  const areaFactor = (radius / 500) ** 2;
 
-  // 상권 활성도 (45점) — 교외/신도시 기준 완화
-  const rScore = Math.min((restaurants / 30) * 20, 20);  // 30개=만점 (기존 50개)
-  const cScore = Math.min((cafes / 20) * 15, 15);        // 20개=만점 (기존 30개)
-  const sScore = Math.min((convStores / 7) * 10, 10);    // 7개=만점 (기존 10개)
+  // 교통 접근성 (25점): 반경별 만점 기준 버스정류장 수 조정
+  // 500m=5개, 150m≈1개, 1.5K≈45개
+  const busMax = Math.max(1, Math.round(5 * areaFactor));
+  const transitScore = Math.min(Math.round((busStops / busMax) * 25), 25);
+
+  // 상권 활성도 (45점) — 반경 면적에 비례한 만점 기준
+  const rMax = Math.max(1, Math.round(30 * areaFactor));  // 500m=30개
+  const cMax = Math.max(1, Math.round(20 * areaFactor));  // 500m=20개
+  const sMax = Math.max(1, Math.round(7  * areaFactor));  // 500m=7개
+  const rScore = Math.min((restaurants / rMax) * 20, 20);
+  const cScore = Math.min((cafes      / cMax) * 15, 15);
+  const sScore = Math.min((convStores / sMax) * 10, 10);
   const commerceScore = Math.round(rScore + cScore + sScore);
 
-  // 주거 밀도 (30점): 반경 내 아파트 단지 수 기준
-  // 10개 단지 이상 = 만점 (신도시/교외 기준)
-  const residentialScore = Math.min(Math.round((aptComplexCount / 10) * 30), 30);
+  // 주거 밀도 (30점): 반경 면적에 비례
+  const aptMax = Math.max(1, Math.round(10 * areaFactor)); // 500m=10단지
+  const residentialScore = Math.min(Math.round((aptComplexCount / aptMax) * 30), 30);
   // 세대수 추정 (단지당 평균 700세대)
   const totalHouseholds = aptComplexCount * 700;
 
