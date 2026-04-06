@@ -37,6 +37,41 @@ export interface KakaoPlace {
   distance: number;
 }
 
+// 반경 내 카테고리 장소 전체 조회 (페이지네이션, 최대 3페이지=45개)
+export async function searchNearbyPlaces(
+  lat: number,
+  lng: number,
+  categoryCode: string,
+  radius = 500
+): Promise<KakaoPlace[]> {
+  const all: KakaoPlace[] = [];
+  for (let page = 1; page <= 3; page++) {
+    const params = new URLSearchParams({
+      category_group_code: categoryCode,
+      x: String(lng),
+      y: String(lat),
+      radius: String(radius),
+      size: "15",
+      page: String(page),
+    });
+    const res = await fetch(`${BASE}/v2/local/search/category.json?${params}`, {
+      headers: { Authorization: `KakaoAK ${REST_KEY}` },
+    });
+    const data = await res.json();
+    const places = (data.documents ?? []).map((d: any) => ({
+      id: d.id,
+      placeName: d.place_name,
+      categoryName: d.category_name,
+      lat: parseFloat(d.y),
+      lng: parseFloat(d.x),
+      distance: parseInt(d.distance),
+    })) as KakaoPlace[];
+    all.push(...places);
+    if (data.meta?.is_end) break;
+  }
+  return all;
+}
+
 // 반경 내 카테고리 장소 검색 - total_count 반환
 export async function searchNearbyCount(
   lat: number,
@@ -177,11 +212,15 @@ export function calcFootTrafficEstimate(
   restaurants: number,
   cafes: number,
   convStores: number,
-  aptComplexCount = 0,  // 아파트 단지 수
-  radius = 500          // 분석 반경 (m)
+  aptComplexCount = 0,
+  radius = 500,
+  isochroneAreaM2?: number  // 이소크론 실제 면적 (있으면 우선 사용)
 ): FootTrafficEstimate {
-  // 반경 면적 비율 (500m 기준, π×r² 비례)
-  const areaFactor = (radius / 500) ** 2;
+  // 이소크론 면적 있으면 실제 면적 기준, 없으면 원형 반경 기준
+  const circleAreaM2 = Math.PI * 500 * 500; // 500m 원 기준면적
+  const areaFactor = isochroneAreaM2
+    ? isochroneAreaM2 / circleAreaM2
+    : (radius / 500) ** 2;
 
   // 교통 접근성 (25점): 반경 무관 고정 — 버스정류장은 밀도가 아닌 접근성 개념
   // 1개=5점, 5개 이상=만점 (반경을 넓혀도 같은 정류장이면 동일 점수 유지)

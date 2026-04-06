@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   addressToCoords,
   searchNearbyCount,
+  searchNearbyPlaces,
   searchBusStopsCount,
   searchApartmentCount,
   calcFootTrafficEstimate,
 } from "@/infrastructure/api/kakao-client";
 import { searchSohoRestaurantCount } from "@/infrastructure/api/soho-client";
+import { getIsochrone, isPointInPolygon } from "@/infrastructure/api/isochrone-client";
 import { PYEONGTAEK_STATIONS } from "@/infrastructure/api/bus-client";
 import { prisma } from "@/lib/prisma";
 
@@ -36,6 +38,8 @@ export async function GET(req: NextRequest) {
   const lngParam = searchParams.get("lng");
   const radiusParam = parseInt(searchParams.get("radius") ?? "500", 10);
   const radius = [300, 500, 1000].includes(radiusParam) ? radiusParam : 500;
+  const isoMode = (searchParams.get("mode") ?? "car") as "car" | "walk";
+  const isoMinutes = parseInt(searchParams.get("minutes") ?? "5", 10);
 
   let lat: number, lng: number, resolvedAddress: string;
 
@@ -67,15 +71,33 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "address 또는 lat/lng 파라미터 필요" }, { status: 400 });
   }
 
-  // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB(영업중 음식점) + 아파트
-  const [busResult, restaurantResult, cafeResult, convResult, aptResult, sohoResult] = await Promise.all([
-    searchBusStopsCount(lat, lng, radius),
-    searchNearbyCount(lat, lng, "FD6", radius),       // 음식점 (카카오)
-    searchNearbyCount(lat, lng, "CE7", radius),       // 카페 (카카오)
-    searchNearbyCount(lat, lng, "CS2", radius),       // 편의점 (카카오)
-    searchApartmentCount(lat, lng, radius),           // 아파트 단지 (카카오)
-    searchSohoRestaurantCount(lat, lng, radius),      // 영업중 음식점 (소상공인DB)
+  // 이소크론 먼저 조회 (실패 시 null → 반경 폴백)
+  const isochrone = await getIsochrone(lat, lng, isoMode, isoMinutes);
+  const searchRadius = isochrone ? isochrone.boundingRadius : radius;
+
+  // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB + 아파트
+  const [busResult, restaurantPlaces, cafePlaces, convPlaces, aptResult, sohoResult] = await Promise.all([
+    searchBusStopsCount(lat, lng, isochrone ? Math.min(searchRadius, 2000) : radius),
+    searchNearbyPlaces(lat, lng, "FD6", searchRadius), // 음식점 (좌표 포함)
+    searchNearbyPlaces(lat, lng, "CE7", searchRadius), // 카페 (좌표 포함)
+    searchNearbyPlaces(lat, lng, "CS2", searchRadius), // 편의점 (좌표 포함)
+    searchApartmentCount(lat, lng, searchRadius),
+    searchSohoRestaurantCount(lat, lng, searchRadius),
   ]);
+
+  // 이소크론 폴리곤으로 필터링 (없으면 반경 내 전체)
+  const filterByIsochrone = <T extends { lat: number; lng: number }>(places: T[]): T[] =>
+    isochrone
+      ? places.filter((p) => isPointInPolygon(p.lng, p.lat, isochrone.polygon))
+      : places;
+
+  const restaurantFiltered = filterByIsochrone(restaurantPlaces);
+  const cafeFiltered       = filterByIsochrone(cafePlaces);
+  const convFiltered       = filterByIsochrone(convPlaces);
+
+  const restaurantResult = { totalCount: restaurantFiltered.length, places: restaurantFiltered };
+  const cafeResult       = { totalCount: cafeFiltered.length,       places: cafeFiltered };
+  const convResult       = { totalCount: convFiltered.length,       places: convFiltered };
 
   // 버스정류장 폴백: Kakao 미인덱스 지역은 PYEONGTAEK_STATIONS 거리 계산
   const kakaoHasBusData = busResult.totalCount > 0;
@@ -133,13 +155,17 @@ export async function GET(req: NextRequest) {
     cafeResult.totalCount,
     convResult.totalCount,
     aptResult.totalCount,
-    radius
+    radius,
+    isochrone?.areaM2
   );
 
   return NextResponse.json({
     address: resolvedAddress,
     coordinates: { lat, lng },
     radius,
+    isochrone: isochrone
+      ? { polygon: isochrone.polygon, areaM2: Math.round(isochrone.areaM2), mode: isochrone.mode, minutes: isochrone.minutes }
+      : null,
     estimate,
     busStopSource: kakaoHasBusData ? "kakao" : "fallback",
     nearby: {

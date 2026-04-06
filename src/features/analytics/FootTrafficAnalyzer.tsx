@@ -22,16 +22,19 @@ interface Station {
   lng: number | null;
 }
 
-const RADIUS_OPTIONS = [
-  { value: 300,  label: "300m" },
-  { value: 500,  label: "500m" },
-  { value: 1000, label: "1K" },
+const ISOCHRONE_OPTIONS = [
+  { mode: "car"  as const, minutes: 5,  label: "차로 5분" },
+  { mode: "car"  as const, minutes: 10, label: "차로 10분" },
+  { mode: "walk" as const, minutes: 10, label: "도보 10분" },
 ] as const;
+
+interface IsochroneOption { mode: "car" | "walk"; minutes: number; label: string; }
 
 interface EstimateResult {
   address: string;
   coordinates: { lat: number; lng: number };
   radius: number;
+  isochrone: { polygon: [number, number][]; areaM2: number; mode: string; minutes: number } | null;
   busStopSource: "kakao" | "fallback";
   estimate: {
     score: number;
@@ -93,6 +96,7 @@ export default function FootTrafficAnalyzer() {
   const mapInstance = useRef<any>(null);
   const markerRef = useRef<any>(null);
   const circleRef = useRef<any>(null);
+  const polygonRef = useRef<any>(null);
   const infoOverlayRef = useRef<any>(null);
   const stationMarkersRef = useRef<any[]>([]);
   const busStopMarkersRef = useRef<any[]>([]);
@@ -102,6 +106,7 @@ export default function FootTrafficAnalyzer() {
 
   const [address, setAddress] = useState("");
   const [radius, setRadius] = useState<300 | 500 | 1000>(500);
+  const [isoOption, setIsoOption] = useState<IsochroneOption>(ISOCHRONE_OPTIONS[0]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [error, setError] = useState("");
@@ -116,26 +121,41 @@ export default function FootTrafficAnalyzer() {
     setStations(list);
   }, []);
 
-  // 반경 원 그리기 (항상 재생성 — setCenter 미지원)
-  const drawCircle = useCallback((lat: number, lng: number, r: number) => {
+  // 이소크론 폴리곤 또는 원 그리기
+  const drawOverlay = useCallback((
+    lat: number, lng: number, r: number,
+    isoPolygon?: [number, number][] | null
+  ) => {
     if (!mapInstance.current || !window.kakao?.maps) return;
     lastAnalyzedPos.current = { lat, lng };
-    if (circleRef.current) {
-      circleRef.current.setMap(null);
-      circleRef.current = null;
+    // 기존 오버레이 제거
+    if (circleRef.current) { circleRef.current.setMap(null); circleRef.current = null; }
+    if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+
+    if (isoPolygon && isoPolygon.length > 0) {
+      // 이소크론 폴리곤 (실제 도로망 기반)
+      const path = isoPolygon.map(([lng, lat]) => new window.kakao.maps.LatLng(lat, lng));
+      polygonRef.current = new window.kakao.maps.Polygon({
+        path,
+        strokeWeight: 2,
+        strokeColor: "#3B82F6",
+        strokeOpacity: 0.8,
+        strokeStyle: "solid",
+        fillColor: "#3B82F6",
+        fillOpacity: 0.07,
+      });
+      polygonRef.current.setMap(mapInstance.current);
+    } else {
+      // 폴백: 반경 원
+      const pos = new window.kakao.maps.LatLng(lat, lng);
+      circleRef.current = new window.kakao.maps.Circle({
+        center: pos, radius: r,
+        strokeWeight: 2, strokeColor: "#3B82F6",
+        strokeOpacity: 0.7, strokeStyle: "dashed",
+        fillColor: "#3B82F6", fillOpacity: 0.08,
+      });
+      circleRef.current.setMap(mapInstance.current);
     }
-    const pos = new window.kakao.maps.LatLng(lat, lng);
-    circleRef.current = new window.kakao.maps.Circle({
-      center: pos,
-      radius: r,
-      strokeWeight: 2,
-      strokeColor: "#3B82F6",
-      strokeOpacity: 0.7,
-      strokeStyle: "dashed",
-      fillColor: "#3B82F6",
-      fillOpacity: 0.08,
-    });
-    circleRef.current.setMap(mapInstance.current);
   }, []);
 
   // 주변 버스정류장 마커 (주황색 작은 마커)
@@ -168,15 +188,19 @@ export default function FootTrafficAnalyzer() {
     });
   }, []);
 
+  const isoOptionRef = useRef(isoOption);
+  useEffect(() => { isoOptionRef.current = isoOption; }, [isoOption]);
+
   const analyze = useCallback(async (lat?: number, lng?: number, addr?: string, r?: number) => {
     setLoading(true);
     setError("");
     const activeRadius = r ?? radiusRef.current;
+    const { mode, minutes } = isoOptionRef.current;
     try {
       const base = addr
         ? `address=${encodeURIComponent(addr)}`
         : `lat=${lat}&lng=${lng}`;
-      const res = await fetch(`/api/foot-traffic?${base}&radius=${activeRadius}`);
+      const res = await fetch(`/api/foot-traffic?${base}&radius=${activeRadius}&mode=${mode}&minutes=${minutes}`);
       if (!res.ok) {
         const e = await res.json();
         setError(e.error ?? "오류 발생");
@@ -190,7 +214,7 @@ export default function FootTrafficAnalyzer() {
         if (markerRef.current) markerRef.current.setPosition(pos);
         else markerRef.current = new window.kakao.maps.Marker({ position: pos, map: mapInstance.current });
         mapInstance.current.panTo(pos);
-        drawCircle(data.coordinates.lat, data.coordinates.lng, activeRadius);
+        drawOverlay(data.coordinates.lat, data.coordinates.lng, activeRadius, data.isochrone?.polygon);
         drawBusStopMarkers(data.nearby.busStops);
 
         // 분석 위치 팝업
@@ -222,16 +246,14 @@ export default function FootTrafficAnalyzer() {
     } finally {
       setLoading(false);
     }
-  }, [drawCircle, drawBusStopMarkers]);
+  }, [drawOverlay, drawBusStopMarkers]);
 
-  // 반경 변경 시 원 재생성 + 자동 재분석 (기존 위치 있을 때)
+  // 이소크론 옵션 변경 시 자동 재분석
   useEffect(() => {
-    radiusRef.current = radius;
     if (lastAnalyzedPos.current && mapInstance.current) {
-      drawCircle(lastAnalyzedPos.current.lat, lastAnalyzedPos.current.lng, radius);
-      analyze(lastAnalyzedPos.current.lat, lastAnalyzedPos.current.lng, undefined, radius);
+      analyze(lastAnalyzedPos.current.lat, lastAnalyzedPos.current.lng);
     }
-  }, [radius]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isoOption]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 스테이션 마커
   const addStationMarkers = useCallback((stationList: Station[]) => {
@@ -379,15 +401,15 @@ export default function FootTrafficAnalyzer() {
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">분석 반경</span>
-          {RADIUS_OPTIONS.map((opt) => (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500">이동 기준</span>
+          {ISOCHRONE_OPTIONS.map((opt) => (
             <button
-              key={opt.value}
-              onClick={() => setRadius(opt.value)}
+              key={opt.label}
+              onClick={() => setIsoOption(opt)}
               className={clsx(
                 "px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
-                radius === opt.value
+                isoOption.label === opt.label
                   ? "bg-blue-600 text-white border-blue-600"
                   : "bg-white text-gray-600 border-gray-300 hover:border-blue-400"
               )}
@@ -395,6 +417,7 @@ export default function FootTrafficAnalyzer() {
               {opt.label}
             </button>
           ))}
+          <span className="text-xs text-gray-400">· 실제 도로망 기준</span>
         </div>
       </div>
 
@@ -478,7 +501,7 @@ export default function FootTrafficAnalyzer() {
           {loading && (
             <div className="bg-white rounded-xl border border-gray-200 p-8 flex items-center justify-center gap-3 text-gray-400">
               <Loader2 size={20} className="animate-spin" />
-              반경 데이터 분석 중...
+              도로망 이소크론 분석 중...
             </div>
           )}
 
@@ -540,11 +563,18 @@ export default function FootTrafficAnalyzer() {
 
               {/* 상권 매출 분석 (Kakao 시설 수 + MOCK 매출 추정) */}
               <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Building2 size={15} className="text-violet-500" />
-                  <p className="text-sm font-semibold text-gray-700">
-                    상권 분석 (반경 {result.radius >= 1000 ? `${result.radius / 1000}K` : `${result.radius}m`})
-                  </p>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Building2 size={15} className="text-violet-500" />
+                    <p className="text-sm font-semibold text-gray-700">상권 분석</p>
+                  </div>
+                  {result.isochrone ? (
+                    <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
+                      {result.isochrone.mode === "car" ? "🚗" : "🚶"} {result.isochrone.minutes}분 · {(result.isochrone.areaM2 / 1000000).toFixed(2)}km²
+                    </span>
+                  ) : (
+                    <span className="text-xs text-gray-400">반경 {result.radius}m</span>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
