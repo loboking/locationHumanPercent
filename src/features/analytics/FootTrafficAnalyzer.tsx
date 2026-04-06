@@ -23,6 +23,7 @@ interface Station {
 }
 
 const RADIUS_OPTIONS = [
+  { value: 300,  label: "300m" },
   { value: 500,  label: "500m" },
   { value: 1000, label: "1K" },
 ] as const;
@@ -45,6 +46,7 @@ interface EstimateResult {
   nearby: {
     busStops: { name: string; distance: number; lat?: number; lng?: number }[];
     restaurants: number;
+    restaurantSource: "soho" | "kakao";
     cafes: number;
     convStores: number;
   };
@@ -99,7 +101,7 @@ export default function FootTrafficAnalyzer() {
   const stationsRef = useRef<Station[]>([]);
 
   const [address, setAddress] = useState("");
-  const [radius, setRadius] = useState<500 | 1000>(500);
+  const [radius, setRadius] = useState<300 | 500 | 1000>(500);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [error, setError] = useState("");
@@ -546,11 +548,11 @@ export default function FootTrafficAnalyzer() {
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
-                    { icon: Bus, label: "버스 정류장", value: result.estimate.busStopCount, color: "text-blue-600 bg-blue-50", noKakao: result.busStopSource === "fallback" },
-                    { icon: Utensils, label: "음식점", value: result.estimate.restaurantCount, color: "text-orange-600 bg-orange-50", noKakao: false },
-                    { icon: Coffee, label: "카페", value: result.estimate.cafeCount, color: "text-amber-600 bg-amber-50", noKakao: false },
-                    { icon: ShoppingBag, label: "편의점", value: result.estimate.convStoreCount, color: "text-emerald-600 bg-emerald-50", noKakao: false },
-                  ].map(({ icon: Icon, label, value, color, noKakao }) => (
+                    { icon: Bus, label: "버스 정류장", value: result.estimate.busStopCount, color: "text-blue-600 bg-blue-50", noKakao: result.busStopSource === "fallback", badge: null },
+                    { icon: Utensils, label: "음식점", value: result.estimate.restaurantCount, color: "text-orange-600 bg-orange-50", noKakao: false, badge: result.nearby.restaurantSource === "soho" ? "소상공인DB" : null },
+                    { icon: Coffee, label: "카페", value: result.estimate.cafeCount, color: "text-amber-600 bg-amber-50", noKakao: false, badge: null },
+                    { icon: ShoppingBag, label: "편의점", value: result.estimate.convStoreCount, color: "text-emerald-600 bg-emerald-50", noKakao: false, badge: null },
+                  ].map(({ icon: Icon, label, value, color, noKakao, badge }) => (
                     <div key={label} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2.5">
                       <div className={clsx("p-1 rounded-lg", color.split(" ")[1])}>
                         <Icon size={14} className={color.split(" ")[0]} />
@@ -558,6 +560,9 @@ export default function FootTrafficAnalyzer() {
                       <div>
                         <p className="text-xs text-gray-500">{label}</p>
                         <p className="font-bold text-gray-900 text-sm">{value}개</p>
+                        {badge && (
+                          <p className="text-xs text-emerald-600 font-medium mt-0.5">✓ {badge}</p>
+                        )}
                         {noKakao && (
                           <p className="text-xs text-amber-500 mt-0.5">카카오 미등록 지역</p>
                         )}

@@ -6,6 +6,7 @@ import {
   searchApartmentCount,
   calcFootTrafficEstimate,
 } from "@/infrastructure/api/kakao-client";
+import { searchSohoRestaurantCount } from "@/infrastructure/api/soho-client";
 import { PYEONGTAEK_STATIONS } from "@/infrastructure/api/bus-client";
 import { prisma } from "@/lib/prisma";
 
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
   const latParam = searchParams.get("lat");
   const lngParam = searchParams.get("lng");
   const radiusParam = parseInt(searchParams.get("radius") ?? "500", 10);
-  const radius = [500, 1000].includes(radiusParam) ? radiusParam : 500;
+  const radius = [300, 500, 1000].includes(radiusParam) ? radiusParam : 500;
 
   let lat: number, lng: number, resolvedAddress: string;
 
@@ -66,13 +67,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "address 또는 lat/lng 파라미터 필요" }, { status: 400 });
   }
 
-  // 병렬 조회: 버스정류장 + 상권 + 아파트
-  const [busResult, restaurantResult, cafeResult, convResult, aptResult] = await Promise.all([
+  // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB(영업중 음식점) + 아파트
+  const [busResult, restaurantResult, cafeResult, convResult, aptResult, sohoResult] = await Promise.all([
     searchBusStopsCount(lat, lng, radius),
-    searchNearbyCount(lat, lng, "FD6", radius), // 음식점
-    searchNearbyCount(lat, lng, "CE7", radius), // 카페
-    searchNearbyCount(lat, lng, "CS2", radius), // 편의점
-    searchApartmentCount(lat, lng, radius),     // 아파트 단지 (Kakao)
+    searchNearbyCount(lat, lng, "FD6", radius),       // 음식점 (카카오)
+    searchNearbyCount(lat, lng, "CE7", radius),       // 카페 (카카오)
+    searchNearbyCount(lat, lng, "CS2", radius),       // 편의점 (카카오)
+    searchApartmentCount(lat, lng, radius),           // 아파트 단지 (카카오)
+    searchSohoRestaurantCount(lat, lng, radius),      // 영업중 음식점 (소상공인DB)
   ]);
 
   // 버스정류장 폴백: Kakao 미인덱스 지역은 PYEONGTAEK_STATIONS 거리 계산
@@ -120,13 +122,18 @@ export async function GET(req: NextRequest) {
       ? Math.round(trafficHistory.reduce((s, d) => s + d.score, 0) / trafficHistory.length)
       : null;
 
+  // 음식점 수: 소상공인DB(영업중) 우선, 없으면 카카오 폴백
+  const activeRestaurantCount = sohoResult.totalCount > 0
+    ? sohoResult.totalCount
+    : restaurantResult.totalCount;
+
   const estimate = calcFootTrafficEstimate(
     busStopCount,
-    restaurantResult.totalCount,
+    activeRestaurantCount,
     cafeResult.totalCount,
     convResult.totalCount,
-    aptResult.totalCount,  // 아파트 단지 수
-    radius                 // 반경 전달 → 만점 기준 동적 조정
+    aptResult.totalCount,
+    radius
   );
 
   return NextResponse.json({
@@ -144,7 +151,8 @@ export async function GET(req: NextRequest) {
           return { name: s.name, distance: distM, lat: coord.lat, lng: coord.lng };
         }),
       ].sort((a, b) => a.distance - b.distance).slice(0, 5),
-      restaurants: restaurantResult.totalCount,
+      restaurants: activeRestaurantCount,
+      restaurantSource: sohoResult.totalCount > 0 ? "soho" : "kakao",
       cafes: cafeResult.totalCount,
       convStores: convResult.totalCount,
     },
