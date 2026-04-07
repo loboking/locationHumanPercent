@@ -20,6 +20,19 @@ export async function getIsochrone(
   minutes = 5
 ): Promise<IsochroneResult | null> {
   const costing = mode === "car" ? "auto" : "pedestrian";
+
+  // 도심 보정: Valhalla는 도로 제한속도 기준이라 신호/정체 미반영
+  // 한국 도심 실제 평균속도 ≈ 제한속도의 60~70%
+  // → 요청 시간을 0.65 배로 축소해 현실적인 커버 범위 산출
+  // 예) 차로 5분 → 3.25분 요청 ≈ 실제 도심 5분 이동 거리
+  //     차로 10분 → 6.5분 요청 ≈ 실제 도심 10분 이동 거리
+  const urbanFactor = mode === "car" ? 0.65 : 1.0;
+  const adjustedMinutes = Math.max(1, Math.round(minutes * urbanFactor * 10) / 10);
+
+  const costingOptions = mode === "car"
+    ? { auto: { use_highways: 0.1 } }
+    : { pedestrian: { walking_speed: 4.5 } };
+
   try {
     const res = await fetch(VALHALLA_URL, {
       method: "POST",
@@ -27,7 +40,8 @@ export async function getIsochrone(
       body: JSON.stringify({
         locations: [{ lon: lng, lat }],
         costing,
-        contours: [{ time: minutes }],
+        costing_options: costingOptions,
+        contours: [{ time: adjustedMinutes }],
         polygons: true,
       }),
       signal: AbortSignal.timeout(8000),
