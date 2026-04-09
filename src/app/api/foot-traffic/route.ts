@@ -6,10 +6,13 @@ import {
   searchBusStopsCount,
   searchApartmentCount,
   calcFootTrafficEstimate,
+  calcPharmacyScore,
 } from "@/infrastructure/api/kakao-client";
-import { searchSohoRestaurantCount } from "@/infrastructure/api/soho-client";
+import { searchSohoRestaurantCount, searchSohoCount } from "@/infrastructure/api/soho-client";
+import { getAgePopulationByRegion } from "@/infrastructure/api/sgis-client";
 import { getIsochrone, isPointInPolygon } from "@/infrastructure/api/isochrone-client";
 import { PYEONGTAEK_STATIONS } from "@/infrastructure/api/bus-client";
+import { getTmapTrafficScore, getTmapRouteMatrix } from "@/infrastructure/api/tmap-client";
 import { prisma } from "@/lib/prisma";
 
 // 정류장별 실제 GPS 좌표 (Kakao 미인덱스 지역 폴백용)
@@ -71,12 +74,32 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "address 또는 lat/lng 파라미터 필요" }, { status: 400 });
   }
 
-  // 이소크론 먼저 조회 (실패 시 null → 반경 폴백)
-  const isochrone = await getIsochrone(lat, lng, isoMode, isoMinutes);
+  // 지역 코드 조회 (SGIS 연령별 인구용)
+  let sido = "", sigungu = "", dong = "";
+  try {
+    const rgCodeRes = await fetch(
+      `https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=${lng}&y=${lat}`,
+      { headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}` } }
+    );
+    const rgCodeData = await rgCodeRes.json();
+    const bDoc = (rgCodeData.documents ?? []).find((d: any) => d.region_type === "B");
+    if (bDoc) {
+      sido = bDoc.region_1depth_name ?? "";
+      sigungu = bDoc.region_2depth_name ?? "";
+      dong = bDoc.region_3depth_name ?? "";
+    }
+  } catch { /* 무시 */ }
+
+  // 이소크론 + SGIS 연령별 인구 + T맵 교통정보 병렬 조회
+  const [isochrone, agePopulation, tmapTraffic] = await Promise.all([
+    getIsochrone(lat, lng, isoMode, isoMinutes),
+    sido && sigungu && dong ? getAgePopulationByRegion(sido, sigungu, dong) : Promise.resolve(null),
+    getTmapTrafficScore(lat, lng, 1),
+  ]);
   const searchRadius = isochrone ? isochrone.boundingRadius : radius;
 
-  // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB + 아파트 + 주차장
-  const [busResult, restaurantData, cafeData, convData, aptResult, sohoResult, parkingData] = await Promise.all([
+  // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB + 아파트 + 주차장 + 병원 + 경쟁약국
+  const [busResult, restaurantData, cafeData, convData, aptResult, sohoResult, parkingData, hospitalResult, pharmacyCompResult] = await Promise.all([
     searchBusStopsCount(lat, lng, isochrone ? Math.min(searchRadius, 2000) : radius),
     searchNearbyPlaces(lat, lng, "FD6", searchRadius), // 음식점
     searchNearbyPlaces(lat, lng, "CE7", searchRadius), // 카페
@@ -84,6 +107,8 @@ export async function GET(req: NextRequest) {
     searchApartmentCount(lat, lng, searchRadius),
     searchSohoRestaurantCount(lat, lng, searchRadius),
     searchNearbyCount(lat, lng, "PK6", searchRadius),  // 주차장
+    searchSohoCount(lat, lng, "hospital", searchRadius), // 병원/의원 (소상공인DB)
+    searchSohoCount(lat, lng, "pharmacy", searchRadius), // 경쟁 약국 (소상공인DB)
   ]);
 
   // 이소크론 폴리곤으로 필터링 (지도 표시용, max 45개 한계 있음)
@@ -101,6 +126,11 @@ export async function GET(req: NextRequest) {
   const restaurantResult = { totalCount: restaurantData.totalCount, places: restaurantFiltered };
   const cafeResult       = { totalCount: cafeData.totalCount,       places: cafeFiltered };
   const convResult       = { totalCount: convData.totalCount,       places: convFiltered };
+
+  // T맵 경로 매트릭스: 아파트 단지 → 분석 위치 차량 소요 시간
+  const tmapMatrix = aptResult.complexes.length > 0
+    ? await getTmapRouteMatrix(aptResult.complexes, lat, lng)
+    : null;
 
   // 버스정류장 폴백: Kakao 미인덱스 지역은 PYEONGTAEK_STATIONS 거리 계산
   const kakaoHasBusData = busResult.totalCount > 0;
@@ -164,6 +194,18 @@ export async function GET(req: NextRequest) {
     isoMode
   );
 
+  // 약국 전용 점수
+  const pharmacyEstimate = calcPharmacyScore(
+    busStopCount,
+    parkingData.totalCount,
+    hospitalResult.totalCount,
+    pharmacyCompResult.totalCount,
+    convResult.totalCount,
+    aptResult.totalCount,
+    isochrone?.areaM2,
+    isoMode
+  );
+
   // 데이터 신뢰도 평가 (Phase 1: 실데이터 비율 산출)
   const realDataSources = [
     busStopCount > 0,                        // 버스정류장: 실측
@@ -183,6 +225,20 @@ export async function GET(req: NextRequest) {
       ? { polygon: isochrone.polygon, areaM2: Math.round(isochrone.areaM2), mode: isochrone.mode, minutes: isochrone.minutes }
       : null,
     estimate,
+    pharmacyEstimate,
+    agePopulation: agePopulation ? {
+      adm_nm: agePopulation.adm_nm,
+      total: agePopulation.total,
+      age20s: agePopulation.age20s,
+      age30s: agePopulation.age30s,
+      age40s: agePopulation.age40s,
+      age50s: agePopulation.age50s,
+      age60s: agePopulation.age60s,
+      youngFamily: agePopulation.youngFamily,
+      chronicPatient: agePopulation.chronicPatient,
+      youngFamilyRatio: agePopulation.youngFamilyRatio,
+      chronicPatientRatio: agePopulation.chronicPatientRatio,
+    } : null,
     busStopSource: kakaoHasBusData ? "kakao" : "fallback",
     dataQuality: {
       confidence,
@@ -220,5 +276,19 @@ export async function GET(req: NextRequest) {
       avgScore: avgTrafficScore,
       hourlyAvg,
     },
+    roadTraffic: tmapTraffic ? {
+      score: tmapTraffic.score,
+      avgSpeed: tmapTraffic.avgSpeed,
+      majorRoadCount: tmapTraffic.majorRoadCount,
+      congestionLevel: tmapTraffic.congestionLevel,
+      congestionLabel: tmapTraffic.congestionLabel,
+      roadNames: tmapTraffic.roadNames,
+    } : null,
+    carAccessibility: tmapMatrix ? {
+      avgDriveMinutes: tmapMatrix.avgDriveMinutes,
+      within10min: tmapMatrix.within10min,
+      within15min: tmapMatrix.within15min,
+      totalOrigins: tmapMatrix.totalOrigins,
+    } : null,
   });
 }

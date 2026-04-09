@@ -171,7 +171,7 @@ export async function searchApartmentCount(
   lat: number,
   lng: number,
   radius = 500
-): Promise<{ totalCount: number; complexes: { name: string; distance: number }[] }> {
+): Promise<{ totalCount: number; complexes: { name: string; distance: number; lat: number; lng: number }[] }> {
   const params = new URLSearchParams({
     query: "아파트",
     x: String(lng),
@@ -186,14 +186,125 @@ export async function searchApartmentCount(
   const data = await res.json();
   const complexes = (data.documents ?? [])
     .filter((d: any) => d.category_name?.includes("아파트"))
-    .map((d: any) => ({ name: d.place_name as string, distance: parseInt(d.distance) }));
+    .map((d: any) => ({
+      name: d.place_name as string,
+      distance: parseInt(d.distance),
+      lat: parseFloat(d.y),
+      lng: parseFloat(d.x),
+    }));
   return {
     totalCount: data.meta?.total_count ?? 0,
     complexes,
   };
 }
 
-// 유동인구 추정 점수 계산
+// ── 약국 전용 점수 계산 ──────────────────────────────────────────────────────
+// 처방수요(40점) + 접근성(30점) + 주거배후(20점) + 경쟁역산(10점) = 100점
+
+export interface PharmacyScoreResult {
+  score: number;
+  grade: "최적" | "적합" | "보통" | "부적합";
+  hospitalCount: number;
+  pharmacyCompetitorCount: number;
+  detail: {
+    prescriptionScore: number;  // /40
+    accessScore: number;        // /30
+    residentialScore: number;   // /20
+    competitionScore: number;   // /10
+  };
+  insights: string[];
+}
+
+export function calcPharmacyScore(
+  busStops: number,
+  parkingCount: number,
+  hospitalCount: number,
+  pharmacyCompetitorCount: number,
+  convStoreCount: number,
+  aptComplexCount: number,
+  isochroneAreaM2?: number,
+  isoMode: "car" | "walk" = "car"
+): PharmacyScoreResult {
+  const areaKm2 = isochroneAreaM2
+    ? isochroneAreaM2 / 1_000_000
+    : Math.PI * (500 / 1000) ** 2;
+
+  // A. 처방 수요 기반 (40점)
+  // 병원 수 기반 (25점): 1개=5점, 5개이상=25점
+  const hospitalBaseScore = Math.min(hospitalCount * 5, 25);
+  // 병원 밀도 보너스 (15점): 전국 도심 평균 3개/km² 기준
+  const hospitalDensity = areaKm2 > 0 ? hospitalCount / areaKm2 : 0;
+  const densityScore = Math.min(Math.round((hospitalDensity / 3) * 15), 15);
+  const prescriptionScore = Math.min(hospitalBaseScore + densityScore, 40);
+
+  // B. 접근성 (30점)
+  // 이동범위 12점 (기존 mobilityScore 재활용)
+  let mobilityScore: number;
+  if (isochroneAreaM2) {
+    mobilityScore = areaKm2 >= 5 ? 12 : areaKm2 >= 2 ? 10 : areaKm2 >= 0.5 ? 7 : 4;
+  } else {
+    mobilityScore = 7;
+  }
+  // 주차장 13점 (상향): 6개이상=13점
+  const pharmacyParkingScore = parkingCount >= 6 ? 13 : Math.round(parkingCount * 13 / 6);
+  // 버스정류장 5점
+  const busAccessScore = Math.min(busStops, 5);
+  const accessScore = Math.min(mobilityScore + pharmacyParkingScore + busAccessScore, 30);
+
+  // C. 주거 배후 인구 (20점)
+  const circleAreaM2 = Math.PI * 500 * 500;
+  const areaFactor = Math.min(isochroneAreaM2 ? isochroneAreaM2 / circleAreaM2 : 1, 4);
+  const aptMax = Math.max(1, Math.round(10 * areaFactor));
+  const aptResScore = Math.min(Math.round((aptComplexCount / aptMax) * 15), 15);
+  const convScore = Math.min(convStoreCount, 5);
+  const residentialScore = Math.min(aptResScore + convScore, 20);
+
+  // D. 경쟁 강도 역산 (10점): 경쟁 약국이 많을수록 감점
+  const competitionScore =
+    pharmacyCompetitorCount === 0 ? 10 :
+    pharmacyCompetitorCount === 1 ? 7 :
+    pharmacyCompetitorCount === 2 ? 4 : 0;
+
+  const score = Math.min(prescriptionScore + accessScore + residentialScore + competitionScore, 100);
+  const grade: PharmacyScoreResult["grade"] =
+    score >= 75 ? "최적" : score >= 55 ? "적합" : score >= 35 ? "보통" : "부적합";
+
+  // 자동 인사이트
+  const insights: string[] = [];
+  if (hospitalCount >= 5) {
+    insights.push(`병원 ${hospitalCount}개 — 처방 수요 우수 (일 예상 외래 ${hospitalCount * 30}~${hospitalCount * 80}명)`);
+  } else if (hospitalCount >= 2) {
+    insights.push(`병원 ${hospitalCount}개 — 처방 수요 양호`);
+  } else if (hospitalCount === 0) {
+    insights.push("병원 없음 — 처방 수요 취약, 일반의약품/건강기능식품 중심 전략 필요");
+  }
+  if (pharmacyCompetitorCount === 0) {
+    insights.push("경쟁 약국 없음 — 독점 입지");
+  } else if (pharmacyCompetitorCount >= 3) {
+    insights.push(`경쟁 약국 ${pharmacyCompetitorCount}개 — 처방 분산 위험, 차별화 전략 필수`);
+  } else {
+    insights.push(`경쟁 약국 ${pharmacyCompetitorCount}개 — 경쟁 존재하나 관리 가능 수준`);
+  }
+  if (parkingCount >= 4) {
+    insights.push(`주차장 ${parkingCount}개 — 차량 접근 우수 (여성·육아세대 유입 유리)`);
+  } else if (parkingCount === 0) {
+    insights.push("주차 시설 없음 — 차량 방문 고객 흡수 불리 (창고형 약국 핵심 약점)");
+  }
+  if (aptComplexCount >= 5) {
+    insights.push(`아파트 단지 ${aptComplexCount}개 — 30-40대 육아세대 배후인구 풍부`);
+  }
+
+  return {
+    score,
+    grade,
+    hospitalCount,
+    pharmacyCompetitorCount,
+    detail: { prescriptionScore, accessScore, residentialScore, competitionScore },
+    insights,
+  };
+}
+
+// ── 유동인구 추정 점수 계산 ──────────────────────────────────────────────────
 // 교통(25점) + 상권(45점) + 주거(30점) = 100점
 export interface FootTrafficEstimate {
   score: number;          // 100점 만점 (기준치 cap 적용)

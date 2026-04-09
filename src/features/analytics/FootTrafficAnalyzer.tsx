@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Script from "next/script";
 import {
-  Search, MapPin, TrendingUp, Bus, Utensils, Coffee, ShoppingBag,
-  Loader2, Home, BarChart2, Building2, Plus, Trash2, Settings, X, ParkingSquare
+  Search, MapPin, TrendingUp, Bus,
+  Loader2, Plus, Trash2, Settings, X, Copy, Check,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -28,6 +28,20 @@ const ISOCHRONE_OPTIONS = [
 ] as const;
 
 interface IsochroneOption { mode: "car" | "walk"; minutes: number; label: string; }
+
+interface PharmacyEstimate {
+  score: number;
+  grade: "최적" | "적합" | "보통" | "부적합";
+  hospitalCount: number;
+  pharmacyCompetitorCount: number;
+  detail: {
+    prescriptionScore: number;
+    accessScore: number;
+    residentialScore: number;
+    competitionScore: number;
+  };
+  insights: string[];
+}
 
 interface EstimateResult {
   address: string;
@@ -73,6 +87,20 @@ interface EstimateResult {
       convRatio: number;
     };
   };
+  pharmacyEstimate?: PharmacyEstimate;
+  agePopulation?: {
+    adm_nm: string;
+    total: number;
+    age20s: number;
+    age30s: number;
+    age40s: number;
+    age50s: number;
+    age60s: number;
+    youngFamily: number;
+    chronicPatient: number;
+    youngFamilyRatio: number;
+    chronicPatientRatio: number;
+  } | null;
   nearby: {
     busStops: { name: string; distance: number; lat?: number; lng?: number }[];
     restaurants: number;
@@ -92,6 +120,21 @@ interface EstimateResult {
     avgScore: number | null;
     hourlyAvg: { hour: number; label: string; score: number }[];
   };
+  roadTraffic?: {
+    score: number;
+    avgSpeed: number;
+    majorRoadCount: number;
+    congestionLevel: 1 | 2 | 3 | 4;
+    congestionLabel: string;
+    roadNames: string[];
+  } | null;
+  carAccessibility?: {
+    avgDriveMinutes: number;
+    within10min: number;
+    within15min: number;
+    totalOrigins: number;
+    source: "tmap" | "haversine";
+  } | null;
 }
 
 const GRADE_STYLE: Record<string, string> = {
@@ -99,6 +142,13 @@ const GRADE_STYLE: Record<string, string> = {
   높음: "bg-orange-500 text-white",
   보통: "bg-yellow-500 text-white",
   낮음: "bg-gray-400 text-white",
+};
+
+const PHARMACY_GRADE_STYLE: Record<string, string> = {
+  최적: "bg-emerald-500 text-white",
+  적합: "bg-blue-500 text-white",
+  보통: "bg-yellow-500 text-white",
+  부적합: "bg-red-400 text-white",
 };
 
 const SCORE_BAR = (score: number) =>
@@ -139,7 +189,18 @@ export default function FootTrafficAnalyzer() {
   const [error, setError] = useState("");
   const [stations, setStations] = useState<Station[]>([]);
   const [showStationMgr, setShowStationMgr] = useState(false);
+  const [showApiSettings, setShowApiSettings] = useState(false);
   const [newStation, setNewStation] = useState({ name: "", lat: "", lng: "" });
+  const [pharmacyMode, setPharmacyMode] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState(0);
+
+  const copyAddress = useCallback((addr: string) => {
+    navigator.clipboard.writeText(addr).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, []);
 
   useEffect(() => { radiusRef.current = radius; }, [radius]);
 
@@ -218,6 +279,9 @@ export default function FootTrafficAnalyzer() {
   const isoOptionRef = useRef(isoOption);
   useEffect(() => { isoOptionRef.current = isoOption; }, [isoOption]);
 
+  // 함수 ref: analyze를 안정적인 ref로 감싸 deps 체인 재생성을 방지
+  const analyzeRef = useRef<(lat?: number, lng?: number, addr?: string, r?: number) => Promise<void>>(async () => {});
+
   const analyze = useCallback(async (lat?: number, lng?: number, addr?: string, r?: number) => {
     setLoading(true);
     setError("");
@@ -235,6 +299,7 @@ export default function FootTrafficAnalyzer() {
       }
       const data: EstimateResult = await res.json();
       setResult(data);
+      setActiveTab(0);
 
       if (mapInstance.current && window.kakao?.maps) {
         const pos = new window.kakao.maps.LatLng(data.coordinates.lat, data.coordinates.lng);
@@ -275,14 +340,12 @@ export default function FootTrafficAnalyzer() {
     }
   }, [drawOverlay, drawBusStopMarkers]);
 
-  // 이소크론 옵션 변경 시 자동 재분석
-  useEffect(() => {
-    if (lastAnalyzedPos.current && mapInstance.current) {
-      analyze(lastAnalyzedPos.current.lat, lastAnalyzedPos.current.lng);
-    }
-  }, [isoOption]); // eslint-disable-line react-hooks/exhaustive-deps
+  // analyzeRef를 항상 최신 analyze로 유지 (deps 체인 없이 안정적인 참조 제공)
+  useEffect(() => { analyzeRef.current = analyze; }, [analyze]);
 
-  // 스테이션 마커
+  // isoOption 변경 시 자동 재분석 제거 — 수동 분석만 허용
+
+  // 스테이션 마커: analyzeRef를 통해 호출하므로 analyze를 deps에서 제외
   const addStationMarkers = useCallback((stationList: Station[]) => {
     if (!mapInstance.current || !window.kakao?.maps) return;
     stationMarkersRef.current.forEach((m) => m.setMap(null));
@@ -306,7 +369,7 @@ export default function FootTrafficAnalyzer() {
         whiteSpace: "nowrap",
         userSelect: "none",
       });
-      div.addEventListener("click", () => { analyze(station.lat!, station.lng!); });
+      div.addEventListener("click", () => { analyzeRef.current(station.lat!, station.lng!); });
       div.addEventListener("mouseenter", () => { div.style.background = "#1e40af"; });
       div.addEventListener("mouseleave", () => { div.style.background = "#1d4ed8"; });
 
@@ -316,8 +379,10 @@ export default function FootTrafficAnalyzer() {
       overlay.setMap(mapInstance.current);
       stationMarkersRef.current.push(overlay);
     });
-  }, [analyze]);
+  }, []); // analyzeRef는 ref이므로 deps 불필요
 
+  // initMap: analyzeRef, addStationMarkers가 안정적이므로 deps에서 제외 가능하나
+  // addStationMarkers는 useCallback이므로 안정적. analyzeRef는 ref로 교체.
   const initMap = useCallback(() => {
     if (!mapRef.current || !window.kakao?.maps) return;
     if (mapInstance.current) return; // 이미 초기화된 경우 스킵
@@ -328,11 +393,11 @@ export default function FootTrafficAnalyzer() {
       });
       mapInstance.current = map;
       window.kakao.maps.event.addListener(map, "click", (e: any) => {
-        analyze(e.latLng.getLat(), e.latLng.getLng());
+        analyzeRef.current(e.latLng.getLat(), e.latLng.getLng());
       });
       if (stationsRef.current.length > 0) addStationMarkers(stationsRef.current);
     });
-  }, [analyze, addStationMarkers]);
+  }, [addStationMarkers]); // analyze 제거 → initMap 재생성 빈도 최소화
 
   // 탭 재진입 시 Kakao 이미 로드돼있으면 직접 초기화
   useEffect(() => {
@@ -388,363 +453,748 @@ export default function FootTrafficAnalyzer() {
   ] : [];
 
   return (
-    <div className="p-4 md:p-8 space-y-4 md:space-y-6">
-      <div>
-        <h2 className="text-xl md:text-2xl font-bold text-gray-900">유동인구 추정 분석</h2>
-        <p className="text-gray-500 mt-1 text-sm">지도를 클릭하거나 주소를 입력 · 버스정류장 마커를 클릭해 분석합니다</p>
-      </div>
+    <div className="relative h-full overflow-hidden">
 
-      {/* 주소 검색 + 반경 선택 */}
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && analyze(undefined, undefined, address)}
-              placeholder="예: 평택시 고덕동 1234"
-              className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+      {/* ── 지도 (풀스크린 배경) ── */}
+      <Script
+        src={`//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_KEY}&autoload=false`}
+        strategy="afterInteractive"
+        onLoad={initMap}
+      />
+      <div ref={mapRef} className="absolute inset-0 w-full h-full" />
+
+      {/* ── 왼쪽 플로팅 패널 ── */}
+      <div className="absolute top-0 left-0 bottom-0 w-[400px] z-10 bg-white shadow-2xl flex flex-col">
+
+        {/* 헤더 */}
+        <div className="bg-[#1250c8] px-4 py-3 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-white/60 text-[10px] uppercase tracking-widest font-medium">입지 분석</p>
+              {result ? (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <p className="text-white text-sm font-bold truncate">{result.address}</p>
+                  <button onClick={() => copyAddress(result.address)} className="shrink-0 text-white/50 hover:text-white transition-colors">
+                    {copied ? <Check size={12} /> : <Copy size={12} />}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-white text-sm font-semibold mt-0.5">위치를 선택하세요</p>
+              )}
+            </div>
+            <div className="shrink-0">
+              {result && pharmacyMode && result.pharmacyEstimate && (
+                <span className={clsx("px-2 py-0.5 text-xs font-bold rounded", PHARMACY_GRADE_STYLE[result.pharmacyEstimate.grade])}>
+                  {result.pharmacyEstimate.grade}
+                </span>
+              )}
+              {result && !pharmacyMode && (
+                <span className={clsx("px-2 py-0.5 text-xs font-bold rounded", GRADE_STYLE[result.estimate.grade])}>
+                  {result.estimate.grade}
+                </span>
+              )}
+            </div>
           </div>
-          <button
-            onClick={() => analyze(undefined, undefined, address)}
-            disabled={loading || !address}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 shrink-0"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
-            <span className="hidden sm:inline">분석</span>
-          </button>
-          <button
-            onClick={() => setShowStationMgr((v) => !v)}
-            className={clsx(
-              "flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors shrink-0",
-              showStationMgr ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:border-blue-300"
-            )}
-          >
-            <Settings size={14} />
-            <span className="hidden sm:inline">정류장</span>
-          </button>
+          {result?.isochrone && (
+            <p className="text-white/50 text-[10px] mt-1">
+              {result.isochrone.mode === "car" ? "차로" : "도보"} {result.isochrone.minutes}분 · {(result.isochrone.areaM2 / 1_000_000).toFixed(2)} km² · 실도로망 기반
+            </p>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-gray-500">이동 기준</span>
-          {ISOCHRONE_OPTIONS.map((opt) => (
+        {/* 검색바 */}
+        <div className="px-3 py-2.5 border-b border-slate-100 shrink-0 space-y-2">
+          <div className="flex gap-1.5">
+            <div className="relative flex-1">
+              <MapPin size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && analyze(undefined, undefined, address)}
+                placeholder="주소 입력"
+                className="w-full pl-7 pr-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
             <button
-              key={opt.label}
-              onClick={() => setIsoOption(opt)}
-              className={clsx(
-                "px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
-                isoOption.label === opt.label
-                  ? "bg-blue-600 text-white border-blue-600"
-                  : "bg-white text-gray-600 border-gray-300 hover:border-blue-400"
+              onClick={() => analyze(undefined, undefined, address)}
+              disabled={loading || !address}
+              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 disabled:opacity-50 shrink-0"
+            >
+              {loading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+              분석
+            </button>
+            <button
+              onClick={() => setShowStationMgr((v) => !v)}
+              className={clsx("p-1.5 rounded-lg border transition-colors shrink-0",
+                showStationMgr ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-500 hover:border-blue-300"
+              )}
+              title="정류장 관리"
+            >
+              <Settings size={13} />
+            </button>
+            <button
+              onClick={() => setShowApiSettings((v) => !v)}
+              className={clsx("px-2 py-1.5 rounded-lg border text-[10px] font-bold transition-colors shrink-0",
+                showApiSettings ? "bg-slate-100 border-slate-400 text-slate-700" : "bg-white border-gray-200 text-gray-500 hover:border-slate-400"
               )}
             >
-              {opt.label}
-            </button>
-          ))}
-          <span className="text-xs text-gray-400">· 실제 도로망 기준</span>
-        </div>
-      </div>
-
-      {/* 정류장 관리 패널 */}
-      {showStationMgr && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
-              <Bus size={14} className="text-blue-600" />
-              모니터링 정류장 관리
-            </p>
-            <button onClick={() => setShowStationMgr(false)}>
-              <X size={14} className="text-gray-400 hover:text-gray-600" />
+              API
             </button>
           </div>
-          <div className="space-y-1.5 max-h-40 overflow-y-auto">
-            {stations.map((s) => (
-              <div key={s.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
-                <span className="text-gray-800 truncate">{s.name} <span className="text-xs text-gray-400">({s.area})</span></span>
-                <button
-                  onClick={() => handleDeleteStation(s.id)}
-                  className="text-red-400 hover:text-red-600 ml-2 shrink-0"
-                >
-                  <Trash2 size={13} />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {ISOCHRONE_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                onClick={() => setIsoOption(opt)}
+                className={clsx(
+                  "px-2.5 py-0.5 rounded-full text-[10px] font-semibold border transition-colors",
+                  isoOption.label === opt.label ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-300 hover:border-blue-400"
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+            <span className="text-gray-200">|</span>
+            <label className="flex items-center gap-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={pharmacyMode}
+                onChange={(e) => setPharmacyMode(e.target.checked)}
+                className="w-3 h-3 accent-emerald-600 cursor-pointer"
+              />
+              <span className={clsx("text-[10px] font-semibold transition-colors", pharmacyMode ? "text-emerald-700" : "text-gray-400")}>
+                약국 전용
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* 정류장 관리 (접힘) */}
+        {showStationMgr && (
+          <div className="border-b border-slate-200 bg-slate-50 px-3 py-3 shrink-0 space-y-2 max-h-52 overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-600 flex items-center gap-1.5"><Bus size={12} />모니터링 정류장</p>
+              <button onClick={() => setShowStationMgr(false)}><X size={12} className="text-gray-400" /></button>
+            </div>
+            <div className="space-y-1">
+              {stations.map((s) => (
+                <div key={s.id} className="flex items-center justify-between bg-white rounded px-2 py-1.5 text-xs">
+                  <span className="text-gray-700 truncate">{s.name} <span className="text-[10px] text-gray-400">({s.area})</span></span>
+                  <button onClick={() => handleDeleteStation(s.id)} className="text-red-400 hover:text-red-600 ml-2 shrink-0"><Trash2 size={11} /></button>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-slate-200 pt-2">
+              <div className="flex gap-1">
+                <input placeholder="이름" value={newStation.name} onChange={(e) => setNewStation((v) => ({ ...v, name: e.target.value }))}
+                  className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                <input placeholder="위도" value={newStation.lat} onChange={(e) => setNewStation((v) => ({ ...v, lat: e.target.value }))}
+                  className="w-14 border border-gray-200 rounded px-1.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                <input placeholder="경도" value={newStation.lng} onChange={(e) => setNewStation((v) => ({ ...v, lng: e.target.value }))}
+                  className="w-14 border border-gray-200 rounded px-1.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                <button onClick={handleAddStation} className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] shrink-0 flex items-center">
+                  <Plus size={10} />
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* API 설정 (접힘) */}
+        {showApiSettings && (
+          <div className="border-b border-slate-200 bg-slate-50 px-3 py-3 shrink-0 max-h-60 overflow-y-auto">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-slate-600">외부 API 사용 현황</p>
+              <button onClick={() => setShowApiSettings(false)}><X size={12} className="text-gray-400" /></button>
+            </div>
+            <table className="w-full text-[10px]">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="text-left pb-1.5 text-slate-400 font-medium pr-2">API</th>
+                  <th className="text-left pb-1.5 text-slate-400 font-medium pr-2">상태</th>
+                  <th className="text-left pb-1.5 text-slate-400 font-medium pr-2">무료한도</th>
+                  <th className="text-left pb-1.5 text-slate-400 font-medium">단가</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {[
+                  { name: "카카오 지역검색", status: "on", free: "45건/요청", price: "무료" },
+                  { name: "소상공인 상가정보", status: "on", free: "1,000건/일", price: "무료" },
+                  { name: "SGIS 연령별 인구", status: "on", free: "무제한", price: "무료" },
+                  { name: "Valhalla 이소크론", status: "on", free: "무제한", price: "무료" },
+                  { name: "T맵 교통정보", status: "on", free: "1,000건/일", price: "11원/건" },
+                  { name: "T맵 경로 매트릭스", status: "on", free: "20건/일→폴백", price: "33원/건" },
+                  { name: "T맵 puzzle 혼잡도", status: "off", free: "3건/일", price: "8.8원/건" },
+                  { name: "T맵 POI 검색", status: "off", free: "20,000건/일", price: "1.1원/건" },
+                ].map((api) => (
+                  <tr key={api.name} className={clsx(api.status === "off" && "opacity-40")}>
+                    <td className="py-1.5 text-slate-700 pr-2">{api.name}</td>
+                    <td className="py-1.5 pr-2">
+                      <span className={clsx("px-1 py-0.5 rounded text-[9px] font-bold", api.status === "on" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400")}>
+                        {api.status === "on" ? "ON" : "OFF"}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-2 text-slate-500">{api.free}</td>
+                    <td className="py-1.5 text-slate-500">{api.price}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* 탭 */}
+        {result && !loading && (
+          <div className="flex border-b border-slate-100 shrink-0 bg-white">
+            {["입지 분석", "상권", "인구·연령", "교통·접근성"].map((tab, i) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(i)}
+                className={clsx(
+                  "flex-1 py-2 text-[10px] font-semibold transition-colors border-b-2",
+                  activeTab === i ? "text-blue-600 border-blue-600" : "text-slate-400 border-transparent hover:text-slate-600"
+                )}
+              >
+                {i + 1}. {tab}
+              </button>
             ))}
           </div>
-          <div className="border-t border-gray-100 pt-3">
-            <p className="text-xs text-gray-500 mb-2">새 정류장 추가</p>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                placeholder="이름"
-                value={newStation.name}
-                onChange={(e) => setNewStation((v) => ({ ...v, name: e.target.value }))}
-                className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-              <div className="flex gap-2">
-                <input
-                  placeholder="위도(lat)"
-                  value={newStation.lat}
-                  onChange={(e) => setNewStation((v) => ({ ...v, lat: e.target.value }))}
-                  className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-                <input
-                  placeholder="경도(lng)"
-                  value={newStation.lng}
-                  onChange={(e) => setNewStation((v) => ({ ...v, lng: e.target.value }))}
-                  className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-                <button
-                  onClick={handleAddStation}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 shrink-0"
-                >
-                  <Plus size={12} />
-                  추가
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-        {/* 지도 */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-100 text-xs text-gray-500 flex flex-wrap items-center gap-1.5">
-            <span>지도 클릭 또는 🚌 파란 마커 클릭 → 분석</span>
-            <span className="text-orange-500">🚏 주황=버스정류장</span>
-          </div>
-          <Script
-            src={`//dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_MAP_KEY}&autoload=false`}
-            strategy="afterInteractive"
-            onLoad={initMap}
-          />
-          <div ref={mapRef} className="w-full" style={{ height: "clamp(280px, 45vw, 520px)" }} />
-        </div>
-
-        {/* 결과 */}
-        <div suppressHydrationWarning className="space-y-4 overflow-y-auto pr-0.5" style={{ maxHeight: "clamp(400px, 80vh, 760px)" }}>
+        {/* 스크롤 컨텐츠 */}
+        <div suppressHydrationWarning className="flex-1 overflow-y-auto">
           {loading && (
-            <div className="bg-white rounded-xl border border-gray-200 p-8 flex items-center justify-center gap-3 text-gray-400">
+            <div className="flex flex-col items-center justify-center gap-3 p-10 text-slate-400">
               <Loader2 size={20} className="animate-spin" />
-              도로망 이소크론 분석 중...
+              <span className="text-sm">도로망 이소크론 분석 중...</span>
             </div>
           )}
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-600">{error}</div>
-          )}
+          {error && <div className="m-3 p-3 bg-red-50 border border-red-200 rounded text-xs text-red-600">{error}</div>}
 
           {result && !loading && (
-            <>
-              {/* 주소 + 종합점수 */}
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-xs text-gray-400">분석 위치</p>
-                    <p className="font-semibold text-gray-900 mt-0.5 text-sm">{result.address}</p>
-                  </div>
-                  <span className={clsx("px-3 py-1 rounded-full text-sm font-bold shrink-0 ml-2", GRADE_STYLE[result.estimate.grade])}>
-                    {result.estimate.grade}
-                  </span>
-                </div>
-
-                <div className="mt-3">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-gray-700">유동인구 추정 점수</span>
-                    <div className="flex items-center gap-2">
-                      {result.estimate.overScore > 0 && (
-                        <span className="text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                          +{result.estimate.overScore} 초과
-                        </span>
-                      )}
-                      <span className="font-bold text-gray-900">{result.estimate.score} / 100</span>
+            <div className="p-3 space-y-3">
+              {/* ─ TAB 0: 입지 분석 ─ */}
+              {activeTab === 0 && (<>
+              {/* ── 1. 분석 개요 카드 ── */}
+              <div className="bg-white border border-slate-200 rounded-lg p-4">
+                {/* 헤더: 주소 + 등급 배지 */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">분석 위치</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{result.address}</p>
+                      <button
+                        onClick={() => copyAddress(result.address)}
+                        className="shrink-0 text-slate-400 hover:text-slate-600 transition-colors"
+                        title="주소 복사"
+                      >
+                        {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                      </button>
                     </div>
                   </div>
-                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className={clsx("h-2.5 rounded-full transition-all duration-700", SCORE_BAR(result.estimate.score))}
-                      style={{ width: `${result.estimate.score}%` }}
-                    />
-                  </div>
-                  {result.estimate.overScore > 0 && (
-                    <p className="text-xs text-amber-600 mt-1">
-                      기준치 100점을 초과하는 고밀도 지역입니다. 상권 포화 가능성을 검토하세요.
-                    </p>
-                  )}
-                </div>
-
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div className="bg-blue-50 rounded-lg p-2.5">
-                    <p className="text-xs text-blue-600 font-medium">교통 접근성</p>
-                    <p className="text-base font-bold text-blue-700 mt-0.5">
-                      {result.estimate.detail.transitScore}
-                      <span className="text-xs font-normal text-blue-400"> / 25</span>
-                    </p>
-                    <div className="mt-1 space-y-0.5 text-[10px] text-blue-500">
-                      <div className="flex justify-between"><span>이동범위</span><span>{result.estimate.detail.mobilityScore}/12</span></div>
-                      <div className="flex justify-between"><span>버스정류장</span><span>{result.estimate.detail.busScore}/8</span></div>
-                      <div className="flex justify-between"><span>주차장</span><span>{result.estimate.detail.parkingScore}/5</span></div>
-                    </div>
-                  </div>
-                  <div className="bg-violet-50 rounded-lg p-2.5">
-                    <p className="text-xs text-violet-600 font-medium">상권 활성도</p>
-                    <p className="text-base font-bold text-violet-700 mt-0.5">
-                      {result.estimate.detail.commerceScore}
-                      <span className="text-xs font-normal text-violet-400"> / 45</span>
-                    </p>
-                    <p className="mt-1 text-[10px] text-violet-400">밀도 기반</p>
-                  </div>
-                  <div className="bg-emerald-50 rounded-lg p-2.5">
-                    <p className="text-xs text-emerald-600 font-medium">주거 밀도</p>
-                    <p className="text-base font-bold text-emerald-700 mt-0.5">
-                      {result.estimate.detail.residentialScore}
-                      <span className="text-xs font-normal text-emerald-400"> / 30</span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 상권 분석 */}
-              <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Building2 size={15} className="text-violet-500" />
-                    <p className="text-sm font-semibold text-gray-700">상권 분석</p>
-                    {/* 신뢰도 배지 */}
-                    {result.dataQuality && (
-                      <span className={clsx("text-xs px-1.5 py-0.5 rounded font-medium", {
-                        "bg-emerald-100 text-emerald-700": result.dataQuality.confidence === "high",
-                        "bg-yellow-100 text-yellow-700": result.dataQuality.confidence === "medium",
-                        "bg-red-100 text-red-600": result.dataQuality.confidence === "low",
-                      })}>
-                        {result.dataQuality.confidence === "high" ? "🟢 실측" :
-                         result.dataQuality.confidence === "medium" ? "🟡 추정" : "🔴 추정"}
+                  <div className="shrink-0">
+                    {pharmacyMode && result.pharmacyEstimate ? (
+                      <span className={clsx("px-2 py-0.5 text-xs font-bold border rounded", PHARMACY_GRADE_STYLE[result.pharmacyEstimate.grade])}>
+                        {result.pharmacyEstimate.grade}
+                      </span>
+                    ) : (
+                      <span className={clsx("px-2 py-0.5 text-xs font-bold border rounded", GRADE_STYLE[result.estimate.grade])}>
+                        {result.estimate.grade}
                       </span>
                     )}
                   </div>
-                  {result.isochrone ? (
-                    <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
-                      {result.isochrone.mode === "car" ? "🚗" : "🚶"} {result.isochrone.minutes}분 · {(result.isochrone.areaM2 / 1000000).toFixed(2)}km²
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-400">반경 {result.radius}m</span>
-                  )}
                 </div>
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  {[
-                    { icon: Bus, label: "버스 정류장", value: result.estimate.busStopCount, color: "text-blue-600 bg-blue-50", sub: result.busStopSource === "fallback" ? "카카오 미등록" : "카카오 실측" },
-                    { icon: Utensils, label: "음식점", value: result.estimate.restaurantCount, color: "text-orange-600 bg-orange-50", sub: result.dataQuality?.sources.restaurant === "soho" ? "✓ 소상공인DB" : "카카오 검색" },
-                    { icon: Coffee, label: "카페", value: result.estimate.cafeCount, color: "text-amber-600 bg-amber-50", sub: "카카오 검색" },
-                    { icon: ShoppingBag, label: "편의점", value: result.estimate.convStoreCount, color: "text-emerald-600 bg-emerald-50", sub: "카카오 검색" },
-                    { icon: ParkingSquare, label: "주차장", value: result.estimate.parkingCount, color: "text-indigo-600 bg-indigo-50", sub: "카카오 검색" },
-                  ].map(({ icon: Icon, label, value, color, sub }) => (
-                    <div key={label} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2.5">
-                      <div className={clsx("p-1 rounded-lg", color.split(" ")[1])}>
-                        <Icon size={14} className={color.split(" ")[0]} />
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">{label}</p>
-                        <p className="font-bold text-gray-900 text-sm">{value.toLocaleString()}개</p>
-                        <p className={clsx("text-xs mt-0.5", sub.startsWith("✓") ? "text-emerald-600 font-medium" : "text-gray-400")}>{sub}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {/* 밀도 배율 (기준 대비) */}
-                {result.estimate.density && (
-                  <div className="mb-3 bg-gray-50 rounded-lg p-2.5">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-xs font-semibold text-gray-600">상권 밀도 (기준 대비 배율)</p>
-                      <span className="text-xs text-gray-400">{result.estimate.density.areaKm2}km²</span>
-                    </div>
-                    <div className="space-y-1">
-                      {[
-                        { label: "음식점", density: result.estimate.density.restaurantPer1km2, ratio: result.estimate.density.restaurantRatio, base: 50, color: "#f97316" },
-                        { label: "카페",   density: result.estimate.density.cafePer1km2,       ratio: result.estimate.density.cafeRatio,       base: 20, color: "#8b5cf6" },
-                        { label: "편의점", density: result.estimate.density.convPer1km2,       ratio: result.estimate.density.convRatio,        base: 7,  color: "#10b981" },
-                      ].map(({ label, density, ratio, base, color }) => (
-                        <div key={label} className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500 w-10 shrink-0">{label}</span>
-                          <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-visible relative">
-                            <div
-                              className="h-1.5 rounded-full"
-                              style={{ width: `${Math.min(ratio * 100, 100)}%`, background: color }}
-                            />
-                            {ratio > 1 && (
-                              <div
-                                className="absolute top-0 h-1.5 rounded-full opacity-40"
-                                style={{ left: "100%", width: `${Math.min((ratio - 1) * 100, 50)}%`, background: color }}
-                              />
-                            )}
-                          </div>
-                          <span className={clsx(
-                            "text-xs font-bold w-10 text-right shrink-0",
-                            ratio >= 1.5 ? "text-orange-600" : ratio >= 1.0 ? "text-emerald-600" : "text-gray-400"
-                          )}>
-                            {ratio.toFixed(1)}배
+
+                {/* 이소크론 메타 */}
+                {result.isochrone && (
+                  <p className="text-[10px] text-slate-400 mt-1.5">
+                    {result.isochrone.mode === "car" ? "차로" : "도보"} {result.isochrone.minutes}분 &middot; {(result.isochrone.areaM2 / 1_000_000).toFixed(2)} km² &middot; 실도로망 기반
+                  </p>
+                )}
+
+                <div className="border-b border-slate-100 my-3" />
+
+                {/* 범용 점수 */}
+                {!pharmacyMode && (
+                  <>
+                    <div className="flex items-end justify-between mb-1.5">
+                      <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">유동인구 추정 점수</p>
+                      <div className="flex items-center gap-2">
+                        {result.estimate.overScore > 0 && (
+                          <span className="text-[10px] font-bold text-amber-600 border border-amber-300 px-1.5 py-0.5">
+                            +{result.estimate.overScore} 초과
                           </span>
-                          <span className="text-xs text-gray-400 w-16 shrink-0">{density}/{base}/km²</span>
+                        )}
+                        <span className="text-2xl font-bold text-slate-900 leading-none">{result.estimate.score}</span>
+                        <span className="text-xs text-slate-400">/ 100</span>
+                      </div>
+                    </div>
+                    <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className={clsx("h-1 rounded-full transition-all duration-700", SCORE_BAR(result.estimate.score))}
+                        style={{ width: `${result.estimate.score}%` }}
+                      />
+                    </div>
+                    {result.estimate.overScore > 0 && (
+                      <p className="text-[10px] text-amber-600 mt-1">기준치 100점 초과 · 상권 포화 가능성을 검토하세요</p>
+                    )}
+
+                    {/* 3개 서브지표 숫자 그리드 */}
+                    <div className="mt-3 grid grid-cols-3 divide-x divide-slate-100">
+                      <div className="pr-3">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">교통</p>
+                        <p className="text-xl font-bold text-slate-900 mt-0.5">
+                          {result.estimate.detail.transitScore}
+                          <span className="text-xs font-normal text-slate-400"> / 25</span>
+                        </p>
+                        <div className="mt-1 space-y-0.5">
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                            <span>이동범위</span><span>{result.estimate.detail.mobilityScore}/12</span>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                            <span>버스정류장</span><span>{result.estimate.detail.busScore}/8</span>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-slate-400">
+                            <span>주차장</span><span>{result.estimate.detail.parkingScore}/5</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="px-3">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">상권</p>
+                        <p className="text-xl font-bold text-slate-900 mt-0.5">
+                          {result.estimate.detail.commerceScore}
+                          <span className="text-xs font-normal text-slate-400"> / 45</span>
+                        </p>
+                        <p className="mt-1 text-[10px] text-slate-400">밀도 기반</p>
+                      </div>
+                      <div className="pl-3">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">주거</p>
+                        <p className="text-xl font-bold text-slate-900 mt-0.5">
+                          {result.estimate.detail.residentialScore}
+                          <span className="text-xs font-normal text-slate-400"> / 30</span>
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* 약국 전용 점수 */}
+                {pharmacyMode && result.pharmacyEstimate && (
+                  <>
+                    <div className="flex items-end justify-between mb-1.5">
+                      <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">약국 입지 점수</p>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-2xl font-bold text-slate-900 leading-none">{result.pharmacyEstimate.score}</span>
+                        <span className="text-xs text-slate-400">/ 100</span>
+                      </div>
+                    </div>
+                    <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-1 rounded-full transition-all duration-700 bg-blue-600"
+                        style={{ width: `${result.pharmacyEstimate.score}%` }}
+                      />
+                    </div>
+
+                    {/* 4개 지표 각각 프로그레스바 */}
+                    <div className="mt-3 space-y-2.5">
+                      {[
+                        { label: "처방 수요", value: result.pharmacyEstimate.detail.prescriptionScore, max: 40, sub: `병원 ${result.pharmacyEstimate.hospitalCount}개` },
+                        { label: "접근성",   value: result.pharmacyEstimate.detail.accessScore,       max: 30, sub: "이동범위 · 주차 · 버스" },
+                        { label: "주거 배후", value: result.pharmacyEstimate.detail.residentialScore,  max: 20, sub: "" },
+                        { label: "경쟁 강도", value: result.pharmacyEstimate.detail.competitionScore,  max: 10, sub: `경쟁약국 ${result.pharmacyEstimate.pharmacyCompetitorCount}개` },
+                      ].map(({ label, value, max, sub }) => (
+                        <div key={label}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">{label}</span>
+                            <span className="text-xs font-bold text-slate-700">{value} <span className="font-normal text-slate-400">/ {max}</span></span>
+                          </div>
+                          <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-1 bg-blue-600 rounded-full transition-all duration-500"
+                              style={{ width: `${(value / max) * 100}%` }}
+                            />
+                          </div>
+                          {sub && <p className="text-[9px] text-slate-400 mt-0.5">{sub}</p>}
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-                {/* 업종 분포 미니 차트 */}
-                {commerceChartData.some((d) => d.value > 0) && (
-                  <ResponsiveContainer width="100%" height={80}>
-                    <BarChart data={commerceChartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} />
-                      <Tooltip formatter={(v: any) => [`${v}개`, "시설 수"]} />
-                      <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-                        {commerceChartData.map((entry, i) => (
-                          <Cell key={i} fill={entry.fill} />
+
+                    {/* 인사이트 */}
+                    {result.pharmacyEstimate.insights.length > 0 && (
+                      <div className="mt-3 border-t border-slate-100 pt-3 space-y-1">
+                        {result.pharmacyEstimate.insights.map((text, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className="text-slate-400 shrink-0 leading-4 text-xs">&rsaquo;</span>
+                            <span className="text-[11px] text-slate-600">{text}</span>
+                          </div>
                         ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
-              {/* 교통량 이력 */}
-              {result.trafficHistory && result.trafficHistory.dataPoints === 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <BarChart2 size={15} className="text-blue-500" />
-                    <p className="text-sm font-semibold text-gray-700">교통량 이력</p>
-                    <span className="text-xs text-gray-400">({result.trafficHistory.stationName} · {result.trafficHistory.distanceKm}km)</span>
+              {/* ── 2. 핵심 지표 그리드 ── */}
+              <div className="bg-white border border-slate-200 rounded-lg p-4">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">
+                  핵심 지표
+                </p>
+                <div className="grid grid-cols-3 gap-0 divide-x divide-slate-100">
+                  {/* 이동권 */}
+                  <div className="pr-3 pb-3">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">이동권</p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">
+                      {result.isochrone ? `${(result.isochrone.areaM2 / 1_000_000).toFixed(2)}` : "-"}
+                      <span className="text-xs font-normal text-slate-500"> km²</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">
+                      {result.dataQuality?.sources.isochrone === "valhalla" ? "Valhalla 도로망" : "반경 원 추정"}
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">
-                    아직 수집된 이력 데이터가 없습니다.<br />
-                    <code className="bg-gray-100 px-1 rounded">npm run collect</code> 실행 후 1시간 뒤 확인하세요.
+                  {/* 거주인구 */}
+                  <div className="px-3 pb-3">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">거주인구</p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">
+                      {result.agePopulation ? result.agePopulation.total.toLocaleString() : "-"}
+                      <span className="text-xs font-normal text-slate-500"> 명</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">통계청 2020</p>
+                  </div>
+                  {/* 아파트 */}
+                  <div className="pl-3 pb-3">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">아파트</p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">
+                      {result.apartments.totalHouseholds > 0 ? result.apartments.totalHouseholds.toLocaleString() : "-"}
+                      <span className="text-xs font-normal text-slate-500"> 세대</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">카카오</p>
+                  </div>
+                  {/* 음식점 */}
+                  <div className="pr-3 pt-3 border-t border-slate-100">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">음식점</p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">
+                      {result.estimate.restaurantCount.toLocaleString()}
+                      <span className="text-xs font-normal text-slate-500"> 개</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">
+                      {result.dataQuality?.sources.restaurant === "soho" ? "소상공인DB" : "카카오"}
+                    </p>
+                  </div>
+                  {/* 병원 */}
+                  <div className="px-3 pt-3 border-t border-slate-100">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+                      {pharmacyMode ? "병원/의원" : "버스정류장"}
+                    </p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">
+                      {pharmacyMode && result.pharmacyEstimate
+                        ? result.pharmacyEstimate.hospitalCount.toLocaleString()
+                        : result.estimate.busStopCount.toLocaleString()}
+                      <span className="text-xs font-normal text-slate-500"> 개</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">소상공인DB</p>
+                  </div>
+                  {/* 주차장 */}
+                  <div className="pl-3 pt-3 border-t border-slate-100">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">주차장</p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">
+                      {result.estimate.parkingCount.toLocaleString()}
+                      <span className="text-xs font-normal text-slate-500"> 개</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">카카오</p>
+                  </div>
+                </div>
+              </div>
+              </>)}
+
+              {/* ─ TAB 1: 상권 ─ */}
+              {activeTab === 1 && (<>
+              {/* ── 3. 상권 현황 테이블 ── */}
+              <div className="bg-white border border-slate-200 rounded-lg p-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-0">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">상권 현황</p>
+                  <div className="flex items-center gap-2">
+                    {result.dataQuality && (
+                      <span className={clsx("px-2 py-0.5 text-[10px] font-bold border", {
+                        "border-slate-300 text-slate-600": result.dataQuality.confidence === "high",
+                        "border-amber-300 text-amber-600": result.dataQuality.confidence === "medium",
+                        "border-red-300 text-red-500": result.dataQuality.confidence === "low",
+                      })}>
+                        {result.dataQuality.confidence === "high" ? "실측" : "추정"}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-slate-400">
+                      분석면적 {result.estimate.density?.areaKm2 ?? "-"} km²
+                    </span>
+                  </div>
+                </div>
+
+                {/* 약국 모드: 병원/경쟁약국/주차/편의점/버스 */}
+                {pharmacyMode && result.pharmacyEstimate ? (
+                  <table className="w-full text-xs mt-0">
+                    <thead>
+                      <tr className="border-b border-slate-100">
+                        <th className="text-left py-2 text-[10px] uppercase tracking-widest text-slate-400 font-medium">업종</th>
+                        <th className="text-right py-2 text-[10px] uppercase tracking-widest text-slate-400 font-medium">점포수</th>
+                        <th className="text-right py-2 text-[10px] uppercase tracking-widest text-slate-400 font-medium">출처</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {[
+                        { label: "병원/의원",  value: result.pharmacyEstimate.hospitalCount,           src: "소상공인DB" },
+                        { label: "경쟁 약국",  value: result.pharmacyEstimate.pharmacyCompetitorCount, src: "소상공인DB" },
+                        { label: "주차장",     value: result.estimate.parkingCount,                   src: "카카오" },
+                        { label: "편의점",     value: result.estimate.convStoreCount,                 src: "카카오" },
+                        { label: "버스정류장", value: result.estimate.busStopCount,                   src: result.busStopSource === "fallback" ? "카카오(미등록)" : "카카오" },
+                      ].map(({ label, value, src }) => (
+                        <tr key={label}>
+                          <td className="py-2 text-slate-700">{label}</td>
+                          <td className="py-2 text-right font-bold text-slate-900">{value.toLocaleString()}개</td>
+                          <td className="py-2 text-right text-[10px] text-slate-400">{src}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <>
+                    {/* 일반 모드: 밀도 배율 테이블 */}
+                    {result.estimate.density && (
+                      <table className="w-full text-xs mt-0">
+                        <thead>
+                          <tr className="border-b border-slate-100">
+                            <th className="text-left py-2 text-[10px] uppercase tracking-widest text-slate-400 font-medium">업종</th>
+                            <th className="text-right py-2 text-[10px] uppercase tracking-widest text-slate-400 font-medium">점포수</th>
+                            <th className="text-right py-2 text-[10px] uppercase tracking-widest text-slate-400 font-medium">밀도</th>
+                            <th className="text-right py-2 text-[10px] uppercase tracking-widest text-slate-400 font-medium hidden sm:table-cell">전국비</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {[
+                            {
+                              label: "음식점", value: result.estimate.restaurantCount,
+                              density: result.estimate.density.restaurantPer1km2,
+                              ratio: result.estimate.density.restaurantRatio,
+                              base: 50,
+                            },
+                            {
+                              label: "카페", value: result.estimate.cafeCount,
+                              density: result.estimate.density.cafePer1km2,
+                              ratio: result.estimate.density.cafeRatio,
+                              base: 20,
+                            },
+                            {
+                              label: "편의점", value: result.estimate.convStoreCount,
+                              density: result.estimate.density.convPer1km2,
+                              ratio: result.estimate.density.convRatio,
+                              base: 7,
+                            },
+                          ].map(({ label, value, density, ratio, base }) => (
+                            <tr key={label}>
+                              <td className="py-2 text-slate-700">{label}</td>
+                              <td className="py-2 text-right font-bold text-slate-900">{value.toLocaleString()}개</td>
+                              <td className="py-2 text-right text-slate-500">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <div className="w-12 h-1 bg-slate-100 rounded-full overflow-hidden hidden sm:block">
+                                    <div
+                                      className="h-1 rounded-full bg-blue-600"
+                                      style={{ width: `${Math.min(ratio * 100, 100)}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px]">{density}/{base}/km²</span>
+                                </div>
+                              </td>
+                              <td className={clsx(
+                                "py-2 text-right font-bold text-xs hidden sm:table-cell",
+                                ratio >= 1.5 ? "text-orange-600" : ratio >= 1.0 ? "text-blue-600" : "text-slate-400"
+                              )}>
+                                {ratio.toFixed(1)}×
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+
+                    {/* 업종 분포 미니 차트 */}
+                    {commerceChartData.some((d) => d.value > 0) && (
+                      <div className="mt-2 border-t border-slate-100 pt-3">
+                        <ResponsiveContainer width="100%" height={72}>
+                          <BarChart data={commerceChartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                            <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} />
+                            <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} />
+                            <Tooltip
+                              formatter={(v: any) => [`${v}개`, "시설 수"]}
+                              contentStyle={{ fontSize: 11, border: "1px solid #e2e8f0", borderRadius: 4 }}
+                            />
+                            <Bar dataKey="value" radius={[2, 2, 0, 0]}>
+                              {commerceChartData.map((entry, i) => (
+                                <Cell key={i} fill={entry.fill} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </>
+                )}
+                <p className="text-[10px] text-slate-400 mt-3 pt-2 border-t border-slate-100">
+                  출처: 소상공인진흥공단 상가정보DB &middot; 카카오 Local API
+                </p>
+              </div>
+              </>)}
+
+              {/* ─ TAB 2: 인구·연령 ─ */}
+              {activeTab === 2 && (<>
+              {/* ── 4. 연령별 거주인구 ── */}
+              {result.agePopulation && (
+                <div className="bg-white border border-slate-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">연령별 거주인구</p>
+                    <span className="text-[10px] text-slate-400">{result.agePopulation.adm_nm}</span>
+                  </div>
+
+                  {/* 약국 모드: 30-40대 vs 50-60대 강조 */}
+                  {pharmacyMode && (
+                    <div className="grid grid-cols-2 divide-x divide-slate-100 mb-4">
+                      <div className="pr-3">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">30–40대 (육아세대)</p>
+                        <p className="text-xl font-bold text-slate-900 mt-0.5">
+                          {result.agePopulation.youngFamily.toLocaleString()}
+                          <span className="text-xs font-normal text-slate-400"> 명</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{result.agePopulation.youngFamilyRatio}% · 저마진 자발적 구매</p>
+                      </div>
+                      <div className="pl-3">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">50–60대 (만성질환)</p>
+                        <p className="text-xl font-bold text-slate-900 mt-0.5">
+                          {result.agePopulation.chronicPatient.toLocaleString()}
+                          <span className="text-xs font-normal text-slate-400"> 명</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{result.agePopulation.chronicPatientRatio}% · 고마진 처방 수요</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 연령대별 단색 바 차트 */}
+                  {(() => {
+                    const maxVal = Math.max(
+                      result.agePopulation.age20s,
+                      result.agePopulation.age30s,
+                      result.agePopulation.age40s,
+                      result.agePopulation.age50s,
+                      result.agePopulation.age60s,
+                    );
+                    const ageRows = [
+                      { label: "20대", value: result.agePopulation.age20s },
+                      { label: "30대", value: result.agePopulation.age30s },
+                      { label: "40대", value: result.agePopulation.age40s },
+                      { label: "50대", value: result.agePopulation.age50s },
+                      { label: "60대", value: result.agePopulation.age60s },
+                    ];
+                    const maxRow = ageRows.reduce((a, b) => (b.value > a.value ? b : a), ageRows[0]);
+                    return (
+                      <div className="space-y-2">
+                        {ageRows.map(({ label, value }) => {
+                          const pct = result.agePopulation!.total > 0
+                            ? Math.round((value / result.agePopulation!.total) * 100)
+                            : 0;
+                          const isMax = label === maxRow.label;
+                          return (
+                            <div key={label} className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-400 w-7 shrink-0">{label}</span>
+                              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className={clsx("h-1.5 rounded-full transition-all duration-500", isMax ? "bg-blue-600" : "bg-slate-700")}
+                                  style={{ width: maxVal > 0 ? `${(value / maxVal) * 100}%` : "0%" }}
+                                />
+                              </div>
+                              <span className="text-[10px] text-slate-500 w-10 text-right shrink-0 font-medium tabular-nums">
+                                {pct}%
+                              </span>
+                              <span className="text-[10px] text-slate-400 w-16 shrink-0 tabular-nums">
+                                {value.toLocaleString()}명
+                              </span>
+                              {isMax && (
+                                <span className="text-[9px] text-blue-600 font-bold shrink-0">MAX</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
+                  <p className="text-[10px] text-slate-400 mt-3 pt-2 border-t border-slate-100">
+                    출처: 통계청 인구주택총조사 2020
+                  </p>
+                </div>
+              )}
+
+              {/* ── 6. 주변 아파트 단지 ── */}
+              {result.apartments && result.apartments.totalHouseholds > 0 && (
+                <div className="bg-white border border-slate-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-0">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">주변 아파트 단지</p>
+                    <span className="text-[10px] font-bold text-slate-700">
+                      총 {result.apartments.totalHouseholds.toLocaleString()}세대
+                    </span>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {result.apartments.complexes.map((apt, i) => (
+                      <div key={i} className="flex items-center justify-between py-2">
+                        <span className="text-xs text-slate-700 truncate">{apt.name}</span>
+                        <span className="text-[10px] font-medium text-slate-400 ml-2 shrink-0 tabular-nums">{apt.distance}m</span>
+                      </div>
+                    ))}
+                  </div>
+                  {result.apartments.totalCount > 5 && (
+                    <p className="text-[10px] text-slate-400 pt-2 border-t border-slate-100 text-center">
+                      외 {result.apartments.totalCount - 5}개 단지
+                    </p>
+                  )}
+                  <p className="text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-100">
+                    출처: 카카오 Local API
+                  </p>
+                </div>
+              )}
+              </>)}
+
+              {/* ─ TAB 3: 교통·접근성 ─ */}
+              {activeTab === 3 && (<>
+              {/* ── 5. 교통량 이력 차트 ── */}
+              {result.trafficHistory && result.trafficHistory.dataPoints === 0 && (
+                <div className="bg-white border border-slate-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">
+                    교통량 이력
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    수집된 이력 데이터가 없습니다.{" "}
+                    <code className="bg-slate-100 px-1 rounded text-[10px]">npm run collect</code> 실행 후 1시간 뒤 확인하세요.
                   </p>
                 </div>
               )}
               {result.trafficHistory && result.trafficHistory.dataPoints > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <BarChart2 size={15} className="text-blue-500" />
-                      <p className="text-sm font-semibold text-gray-700">교통량 이력 (최근 7일)</p>
-                    </div>
-                    <span className="text-xs text-gray-400">
-                      {result.trafficHistory.stationName} · {result.trafficHistory.distanceKm}km
+                <div className="bg-white border border-slate-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">교통량 이력 (최근 7일)</p>
+                    <span className="text-[10px] text-slate-400">
+                      {result.trafficHistory.stationName} &middot; {result.trafficHistory.distanceKm}km
                     </span>
                   </div>
                   {result.trafficHistory.avgScore !== null && (
-                    <p className="text-xs text-gray-500 mb-3">
-                      주간 평균 교통량 지수: <span className="font-bold text-gray-800">{result.trafficHistory.avgScore}점</span>
+                    <p className="text-[10px] text-slate-400 mb-3">
+                      주간 평균 교통량 지수{" "}
+                      <span className="font-bold text-slate-700">{result.trafficHistory.avgScore}점</span>
                     </p>
                   )}
-                  <ResponsiveContainer width="100%" height={120}>
+                  <ResponsiveContainer width="100%" height={110}>
                     <BarChart data={result.trafficHistory.hourlyAvg} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                      <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={3} />
-                      <YAxis tick={{ fontSize: 10 }} domain={[0, 100]} />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} interval={3} />
+                      <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[0, 100]} />
                       <Tooltip
                         formatter={(v: any) => [`${Number(v)}점`, "교통량 지수"]}
                         labelFormatter={(l) => `${l}대 평균`}
+                        contentStyle={{ fontSize: 11, border: "1px solid #e2e8f0", borderRadius: 4 }}
                       />
                       <Bar dataKey="score" radius={[2, 2, 0, 0]}>
                         {result.trafficHistory.hourlyAvg.map((entry, i) => (
@@ -756,57 +1206,102 @@ export default function FootTrafficAnalyzer() {
                 </div>
               )}
 
-              {/* 주변 아파트 단지 */}
-              {result.apartments && result.apartments.totalHouseholds > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <Home size={15} className="text-emerald-500" />
-                      <p className="text-sm font-semibold text-gray-700">주변 아파트 단지</p>
-                    </div>
-                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
-                      총 {result.apartments.totalHouseholds.toLocaleString()}세대
-                    </span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {result.apartments.complexes.map((apt, i) => (
-                      <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
-                        <span className="text-sm text-gray-800 truncate">{apt.name}</span>
-                        <span className="text-xs font-semibold text-gray-500 ml-2 shrink-0">{apt.distance}m</span>
+              {/* ── 7. 인근 버스 정류장 ── */}
+              {result.nearby.busStops.length > 0 && (
+                <div className="bg-white border border-slate-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-100 pb-2 mb-0">
+                    인근 버스 정류장
+                  </p>
+                  <div className="divide-y divide-slate-100">
+                    {result.nearby.busStops.map((stop, i) => (
+                      <div key={i} className="flex items-center justify-between py-2">
+                        <span className="text-xs text-slate-700">{stop.name}</span>
+                        <span className="text-[10px] font-medium text-slate-400 tabular-nums">{stop.distance}m</span>
                       </div>
                     ))}
-                    {result.apartments.totalCount > 5 && (
-                      <p className="text-xs text-gray-400 text-center pt-1">
-                        외 {result.apartments.totalCount - 5}개 단지
-                      </p>
-                    )}
                   </div>
+                  <p className="text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-100">
+                    출처: 카카오 Local API
+                  </p>
+                </div>
+              )}
+              {/* ── 8. 차량 도로 접근성 (T맵) ── */}
+              {result.roadTraffic && (
+                <div className="bg-white border border-slate-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">차량 도로 접근성</p>
+                    <span className={clsx(
+                      "px-2 py-0.5 text-[10px] font-bold rounded border",
+                      result.roadTraffic.congestionLevel === 1 ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                      result.roadTraffic.congestionLevel === 2 ? "bg-blue-50 text-blue-700 border-blue-200" :
+                      result.roadTraffic.congestionLevel === 3 ? "bg-orange-50 text-orange-700 border-orange-200" :
+                      "bg-red-50 text-red-700 border-red-200"
+                    )}>
+                      {result.roadTraffic.congestionLabel}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 mb-3">
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-slate-800 tabular-nums">{result.roadTraffic.avgSpeed}</p>
+                      <p className="text-[10px] text-slate-400">평균속도 km/h</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-slate-800 tabular-nums">{result.roadTraffic.majorRoadCount}</p>
+                      <p className="text-[10px] text-slate-400">주요도로 수</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-slate-800 tabular-nums">{result.roadTraffic.score}</p>
+                      <p className="text-[10px] text-slate-400">접근성 점수</p>
+                    </div>
+                  </div>
+                  {result.roadTraffic.roadNames.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {result.roadTraffic.roadNames.map((name, i) => (
+                        <span key={i} className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] rounded">{name}</span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-slate-400 pt-2 border-t border-slate-100">
+                    출처: T맵 교통정보 API · 실시간
+                  </p>
                 </div>
               )}
 
-              {/* 인근 버스정류장 목록 */}
-              {result.nearby.busStops.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-4">
-                  <p className="text-sm font-semibold text-gray-700 mb-2">인근 버스 정류장</p>
-                  <div className="space-y-1.5">
-                    {result.nearby.busStops.map((stop, i) => (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span className="text-gray-700">🚏 {stop.name}</span>
-                        <span className="text-gray-400">{stop.distance}m</span>
-                      </div>
-                    ))}
+              {/* ── 9. 차량 상권 반경 (경로 매트릭스) ── */}
+              {result.carAccessibility && (
+                <div className="bg-white border border-slate-200 rounded-lg p-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">
+                    차량 상권 반경
+                  </p>
+                  <div className="grid grid-cols-3 gap-3 mb-3">
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-slate-800 tabular-nums">{result.carAccessibility.avgDriveMinutes}분</p>
+                      <p className="text-[10px] text-slate-400">평균 이동시간</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-blue-600 tabular-nums">{result.carAccessibility.within10min}</p>
+                      <p className="text-[10px] text-slate-400">10분내 단지</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-bold text-slate-800 tabular-nums">{result.carAccessibility.within15min}</p>
+                      <p className="text-[10px] text-slate-400">15분내 단지</p>
+                    </div>
                   </div>
+                  <p className="text-[10px] text-slate-400 pt-2 border-t border-slate-100">
+                    출처: {result.carAccessibility.source === "tmap" ? "T맵 경로 매트릭스" : "직선거리 근사값 (T맵 한도 초과)"} · 아파트 {result.carAccessibility.totalOrigins}곳 기준
+                  </p>
                 </div>
               )}
-            </>
+              </>)}
+            </div>
           )}
 
           {!result && !loading && !error && (
-            <div className="bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 p-8 text-center text-gray-400">
-              <TrendingUp size={32} className="mx-auto mb-3 opacity-30" />
+            <div className="bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 p-8 text-center text-slate-400">
+              <TrendingUp size={28} className="mx-auto mb-3 opacity-20" />
               <p className="text-sm">지도를 클릭하거나<br />주소를 입력해 분석을 시작하세요</p>
               {stations.length > 0 && (
-                <p className="text-xs mt-2 text-blue-400">🚌 지도의 파란 마커를 클릭해도 됩니다</p>
+                <p className="text-xs mt-2 text-blue-400">지도의 파란 마커를 클릭해도 됩니다</p>
               )}
             </div>
           )}
