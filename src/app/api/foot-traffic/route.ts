@@ -121,11 +121,21 @@ export async function GET(req: NextRequest) {
   const cafeFiltered       = filterByIsochrone(cafeData.places);
   const convFiltered       = filterByIsochrone(convData.places);
 
-  // 점수 계산용: Kakao meta.total_count (실제 전체 개수, 45개 상한 없음)
-  // 폴리곤 필터 후 45개 상한에 걸려 rMax 대비 과소 카운트되는 버그 방지
-  const restaurantResult = { totalCount: restaurantData.totalCount, places: restaurantFiltered };
-  const cafeResult       = { totalCount: cafeData.totalCount,       places: cafeFiltered };
-  const convResult       = { totalCount: convData.totalCount,       places: convFiltered };
+  // 점수 계산용 카운트: boundingRadius 과대 산출 보정
+  // boundingRadius 원(넓음) 기준 totalCount → 폴리곤 면적 비율로 스케일 다운
+  // 이소크론 없을 때는 totalCount 그대로 사용
+  const circleAreaM2 = Math.PI * searchRadius * searchRadius;
+  const scaleFactor = isochrone
+    ? Math.min(1, isochrone.areaM2 / circleAreaM2)
+    : 1;
+  const scaleCount = (total: number, filtered: number) =>
+    isochrone
+      ? Math.max(filtered, Math.round(total * scaleFactor))
+      : total;
+
+  const restaurantResult = { totalCount: scaleCount(restaurantData.totalCount, restaurantFiltered.length), places: restaurantFiltered };
+  const cafeResult       = { totalCount: scaleCount(cafeData.totalCount, cafeFiltered.length),             places: cafeFiltered };
+  const convResult       = { totalCount: scaleCount(convData.totalCount, convFiltered.length),             places: convFiltered };
 
   // T맵 경로 매트릭스: 아파트 단지 → 분석 위치 차량 소요 시간
   const tmapMatrix = aptResult.complexes.length > 0
@@ -177,9 +187,14 @@ export async function GET(req: NextRequest) {
       ? Math.round(trafficHistory.reduce((s, d) => s + d.score, 0) / trafficHistory.length)
       : null;
 
-  // 음식점 수: 소상공인DB(영업중) 우선, 없으면 카카오 폴백
-  const activeRestaurantCount = sohoResult.totalCount > 0
-    ? sohoResult.totalCount
+  // 음식점 수: 소상공인DB(영업중) 우선, 없으면 카카오 폴백 (소호도 동일 스케일 적용)
+  const scaledSohoCount    = Math.round(sohoResult.totalCount * scaleFactor);
+  const scaledParkingCount = Math.round(parkingData.totalCount * scaleFactor);
+  const scaledHospitalCount = Math.round(hospitalResult.totalCount * scaleFactor);
+  const scaledPharmacyCompCount = Math.round(pharmacyCompResult.totalCount * scaleFactor);
+
+  const activeRestaurantCount = scaledSohoCount > 0
+    ? scaledSohoCount
     : restaurantResult.totalCount;
 
   const estimate = calcFootTrafficEstimate(
@@ -190,16 +205,16 @@ export async function GET(req: NextRequest) {
     aptResult.totalCount,
     radius,
     isochrone?.areaM2,
-    parkingData.totalCount,
+    scaledParkingCount,
     isoMode
   );
 
   // 약국 전용 점수
   const pharmacyEstimate = calcPharmacyScore(
     busStopCount,
-    parkingData.totalCount,
-    hospitalResult.totalCount,
-    pharmacyCompResult.totalCount,
+    scaledParkingCount,
+    scaledHospitalCount,
+    scaledPharmacyCompCount,
     convResult.totalCount,
     aptResult.totalCount,
     isochrone?.areaM2,
