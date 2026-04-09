@@ -74,26 +74,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "address 또는 lat/lng 파라미터 필요" }, { status: 400 });
   }
 
-  // 지역 코드 조회 (SGIS 연령별 인구용)
-  let sido = "", sigungu = "", dong = "";
+  // 지역 코드 조회 (행안부 주민등록 인구용)
+  let moisAdmCd = "", moisAdmNm = "";
   try {
     const rgCodeRes = await fetch(
       `https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=${lng}&y=${lat}`,
       { headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}` } }
     );
     const rgCodeData = await rgCodeRes.json();
-    const bDoc = (rgCodeData.documents ?? []).find((d: any) => d.region_type === "B");
-    if (bDoc) {
-      sido = bDoc.region_1depth_name ?? "";
-      sigungu = bDoc.region_2depth_name ?? "";
-      dong = bDoc.region_3depth_name ?? "";
+    const hDoc = (rgCodeData.documents ?? []).find((d: any) => d.region_type === "H");
+    if (hDoc) {
+      moisAdmCd = hDoc.code ?? "";
+      moisAdmNm = [hDoc.region_1depth_name, hDoc.region_2depth_name, hDoc.region_3depth_name]
+        .filter(Boolean).join(" ");
     }
   } catch { /* 무시 */ }
 
-  // 이소크론 + SGIS 연령별 인구 + T맵 교통정보 병렬 조회
+  // 이소크론 + 행안부 연령별 인구 + T맵 교통정보 병렬 조회
   const [isochrone, agePopulation, tmapTraffic] = await Promise.all([
     getIsochrone(lat, lng, isoMode, isoMinutes),
-    sido && sigungu && dong ? getAgePopulationByRegion(sido, sigungu, dong) : Promise.resolve(null),
+    moisAdmCd ? getAgePopulationByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     getTmapTrafficScore(lat, lng, 1),
   ]);
   const searchRadius = isochrone ? isochrone.boundingRadius : radius;
