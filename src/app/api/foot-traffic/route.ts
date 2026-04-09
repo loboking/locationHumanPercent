@@ -192,6 +192,11 @@ export async function GET(req: NextRequest) {
   const scaledParkingCount = Math.round(parkingData.totalCount * scaleFactor);
   const scaledHospitalCount = Math.round(hospitalResult.totalCount * scaleFactor);
   const scaledPharmacyCompCount = Math.round(pharmacyCompResult.totalCount * scaleFactor);
+  // 아파트 단지수도 동일 스케일 보정 (기존: totalCount 미보정으로 residentialScore 과대 산출)
+  const scaledAptCount = Math.max(
+    aptResult.complexes.length,
+    Math.round(aptResult.totalCount * scaleFactor)
+  );
 
   const activeRestaurantCount = scaledSohoCount > 0
     ? scaledSohoCount
@@ -202,7 +207,7 @@ export async function GET(req: NextRequest) {
     activeRestaurantCount,
     cafeResult.totalCount,
     convResult.totalCount,
-    aptResult.totalCount,
+    scaledAptCount,           // ← 스케일 적용
     radius,
     isochrone?.areaM2,
     scaledParkingCount,
@@ -216,7 +221,7 @@ export async function GET(req: NextRequest) {
     scaledHospitalCount,
     scaledPharmacyCompCount,
     convResult.totalCount,
-    aptResult.totalCount,
+    scaledAptCount,           // ← 스케일 적용
     isochrone?.areaM2,
     isoMode
   );

@@ -356,10 +356,17 @@ export function calcFootTrafficEstimate(
   // 차로 5분 ≈ 3-5km², 차로 10분 ≈ 6-10km², 도보 10분 ≈ 0.3-0.8km²
   let mobilityScore: number;
   if (isochroneAreaM2) {
-    mobilityScore = areaKm2 >= 5 ? 12 : areaKm2 >= 2 ? 10 : areaKm2 >= 0.5 ? 7 : 4;
+    if (isoMode === "walk") {
+      // 도보: 0.3-0.8km² 예상
+      mobilityScore = areaKm2 >= 0.6 ? 7 : areaKm2 >= 0.3 ? 5 : 3;
+    } else {
+      // 차로 5분 ≈ 2-5km², 차로 10분 ≈ 6-12km²
+      // 농촌 평야(대면적)와 도심 구분: 면적 대비 적정 스케일
+      mobilityScore = areaKm2 >= 6 ? 10 : areaKm2 >= 3 ? 8 : areaKm2 >= 1.5 ? 6 : 4;
+    }
   } else {
-    // 이소크론 없을 때 반경 기반 폴백
-    mobilityScore = radius >= 1000 ? 10 : radius >= 500 ? 7 : 4;
+    // 원형 폴백: 실도로망 없음 → 최소 점수
+    mobilityScore = 4;
   }
   // 버스 접근성 (8점): 1개당 2점, 4개 이상=만점
   const busScore = Math.min(busStops * 2, 8);
@@ -369,9 +376,11 @@ export function calcFootTrafficEstimate(
 
   // ── 상권 활성도 (45점) — 밀도(개수/km²) 기반 ────────────────
   // 전국 도심 평균 밀도 기준: 음식점 50/km², 카페 20/km², 편의점 7/km²
-  const rDensity = areaKm2 > 0 ? restaurants / areaKm2 : 0;
-  const cDensity = areaKm2 > 0 ? cafes / areaKm2 : 0;
-  const sDensity = areaKm2 > 0 ? convStores / areaKm2 : 0;
+  // 최소 1km² 적용: 500m 원형(0.785km²) 과밀도 계산 방지
+  const effectiveAreaKm2 = Math.max(areaKm2, 1.0);
+  const rDensity = restaurants / effectiveAreaKm2;
+  const cDensity = cafes / effectiveAreaKm2;
+  const sDensity = convStores / effectiveAreaKm2;
   const rRatio = rDensity / 50;
   const cRatio = cDensity / 20;
   const sRatio = sDensity / 7;
@@ -390,15 +399,16 @@ export function calcFootTrafficEstimate(
   const circleAreaM2 = Math.PI * 500 * 500;
   const rawAreaFactor = isochroneAreaM2 ? isochroneAreaM2 / circleAreaM2 : (radius / 500) ** 2;
   const areaFactor = Math.min(rawAreaFactor, 4);
-  const aptMax = Math.max(1, Math.round(10 * areaFactor));
+  // 기준치 2배: 30점 만점에 더 많은 단지 필요하도록 → 주거 과대평가 방지
+  const aptMax = Math.max(1, Math.round(20 * areaFactor));
   const residentialScore = Math.min(Math.round((aptComplexCount / aptMax) * 30), 30);
   const totalHouseholds = aptComplexCount * 700;
 
-  // 각 항목 모두 cap 적용된 값으로 합산 (25+45+30=100이 이론적 최대)
-  // rawCommerceScore(비제한)를 쓰면 표시값(44/45)과 총점(100)이 불일치하는 버그 발생
   const rawTotal = transitScore + commerceScore + residentialScore;
-  const score = Math.round(rawTotal);
-  const overScore = 0; // 각 항목 cap으로 자연스럽게 100 이하 보장
+  // 이소크론(실도로망) 없을 때 → 원형 추정 신뢰도 75% 적용
+  const confidenceFactor = isochroneAreaM2 ? 1.0 : 0.75;
+  const score = Math.min(Math.round(rawTotal * confidenceFactor), 100);
+  const overScore = 0;
 
   const grade =
     score >= 70 ? "매우높음" :
