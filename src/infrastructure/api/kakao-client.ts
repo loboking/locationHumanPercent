@@ -398,9 +398,11 @@ export function calcFootTrafficEstimate(
   // ── 주거 밀도 (30점) — 반경 면적 비례 ───────────────────────
   const circleAreaM2 = Math.PI * 500 * 500;
   const rawAreaFactor = isochroneAreaM2 ? isochroneAreaM2 / circleAreaM2 : (radius / 500) ** 2;
-  const areaFactor = Math.min(rawAreaFactor, 4);
-  // 기준치 2배: 30점 만점에 더 많은 단지 필요하도록 → 주거 과대평가 방지
-  const aptMax = Math.max(1, Math.round(20 * areaFactor));
+  // 도보 모드(이소크론 0.3~0.7km²): rawAreaFactor < 1 → aptMax = 9 이하로 너무 낮아짐
+  // → 도보는 검색 반경이 ~500m로 car와 거의 같으므로 고정 2.0 사용 (aptMax=40)
+  // → 차로 모드: 넓은 이소크론 비례 (최대 4배 → aptMax=80)
+  const aptAreaFactor = isoMode === "walk" ? 2.0 : Math.min(rawAreaFactor, 4);
+  const aptMax = Math.max(1, Math.round(20 * aptAreaFactor));
   const residentialScore = Math.min(Math.round((aptComplexCount / aptMax) * 30), 30);
   const totalHouseholds = aptComplexCount * 700;
 
