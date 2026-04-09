@@ -22,16 +22,16 @@ export async function getIsochrone(
   const costing = mode === "car" ? "auto" : "pedestrian";
 
   // 도심 보정: Valhalla 자유주행/자유보행 속도 → 실제 도심 속도 보정
-  // 차로: 고덕동 신도시 기준, 제한속도 대비 실제 주행 ≈ 73%
-  //   예) 차로 5분 → 3.65분 요청, 차로 10분 → 7.3분 요청
-  // 도보: 4.5km/h 자유보행 → 신호대기·횡단보도 포함 실제 ≈ 80%
-  //   예) 도보 10분 → 8분 요청 ≈ 실제 도심 10분 보행 거리
-  const urbanFactor = mode === "car" ? 0.73 : 0.80;
+  // 차로: 제한속도 대비 실제 주행 ≈ 73%
+  //   예) 차로 5분 → 3.65분 요청
+  // 도보: 신호대기(30~90초/교차로) + 횡단보도 대기 포함 실효율 ≈ 65%
+  //   예) 도보 10분 → 6.5분 요청 ≈ 실제 체감 10분 보행 거리
+  const urbanFactor = mode === "car" ? 0.73 : 0.65;
   const adjustedMinutes = Math.max(1, Math.round(minutes * urbanFactor * 10) / 10);
 
   const costingOptions = mode === "car"
     ? { auto: { use_highways: 0.1 } }
-    : { pedestrian: { walking_speed: 3.5 } }; // 실제 도심 평균 보행속도 (신호대기 미포함)
+    : { pedestrian: { walking_speed: 3.5 } };
 
   try {
     const res = await fetch(VALHALLA_URL, {
