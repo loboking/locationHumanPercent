@@ -394,9 +394,11 @@ export function calcFootTrafficEstimate(
   const residentialScore = Math.min(Math.round((aptComplexCount / aptMax) * 30), 30);
   const totalHouseholds = aptComplexCount * 700;
 
-  const rawTotal = transitScore + rawCommerceScore + residentialScore;
-  const score = Math.min(Math.round(rawTotal), 100);
-  const overScore = Math.max(0, Math.round(rawTotal - 100));
+  // 각 항목 모두 cap 적용된 값으로 합산 (25+45+30=100이 이론적 최대)
+  // rawCommerceScore(비제한)를 쓰면 표시값(44/45)과 총점(100)이 불일치하는 버그 발생
+  const rawTotal = transitScore + commerceScore + residentialScore;
+  const score = Math.round(rawTotal);
+  const overScore = 0; // 각 항목 cap으로 자연스럽게 100 이하 보장
 
   const grade =
     score >= 70 ? "매우높음" :
