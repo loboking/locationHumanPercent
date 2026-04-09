@@ -1,9 +1,17 @@
-// 행정안전부 주민등록인구통계 API (data.go.kr)
-// 월별 업데이트 최신 데이터, 행정동 코드(H-type) 직접 사용
-// Base URL: https://apis.data.go.kr/1741000/rsdntrgstatsvc
+// 인구 연령 통계 - 1순위: 행안부 주민등록인구통계(data.go.kr), 2순위: SGIS(통계청 2020 인구총조사)
+// 행안부 API: 월별 업데이트, H-type 행정동 코드 직접 사용
+// SGIS 폴백: 행안부 실패 시 2020년 인구총조사 데이터 사용
 
 const SERVICE_KEY = process.env.PUBLIC_DATA_SERVICE_KEY!;
-const BASE = "https://apis.data.go.kr/1741000/rsdntrgstatsvc";
+const MOIS_BASE = "https://apis.data.go.kr/1741000/rsdntrgstatsvc";
+
+const SGIS_KEY = process.env.SGIS_CONSUMER_KEY!;
+const SGIS_SECRET = process.env.SGIS_CONSUMER_SECRET!;
+const SGIS_BASE = "https://sgisapi.mods.go.kr/OpenAPI3";
+
+// age_type 코드: 30=0-9세, 31=10-19세, 32=20-29세, 33=30-39세,
+// 34=40-49세, 35=50-59세, 36=60-69세, 37=70-79세, 38=80-89세, 39=90세+
+const SGIS_AGE_TYPES = [30, 31, 32, 33, 34, 35, 36, 37, 38, 39] as const;
 
 export interface AgePopulation {
   adm_cd: string;
@@ -28,24 +36,18 @@ export interface AgePopulation {
 function getPrevYearMonth(): { year: string; month: string } {
   const now = new Date();
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const year = String(prev.getFullYear());
-  const month = String(prev.getMonth() + 1).padStart(2, "0");
-  return { year, month };
+  return {
+    year: String(prev.getFullYear()),
+    month: String(prev.getMonth() + 1).padStart(2, "0"),
+  };
 }
 
-// 연령별 인구 조회 (메인 공개 함수)
-// admCd: Kakao coord2regioncode H-type의 code 필드 (10자리)
-// admNm: region_1depth_name + region_2depth_name + region_3depth_name 조합
-export async function getAgePopulationByRegion(
-  admCd: string,
-  admNm: string
-): Promise<AgePopulation | null> {
-  if (!SERVICE_KEY || !admCd) return null;
-
+// ── 1순위: 행안부 주민등록인구통계 ──────────────────────────────
+async function fetchMoisPopulation(admCd: string, admNm: string): Promise<AgePopulation | null> {
+  if (!SERVICE_KEY) return null;
   const { year, month } = getPrevYearMonth();
-
   try {
-    const url = new URL(`${BASE}/getRsdntrgStatAgeListData`);
+    const url = new URL(`${MOIS_BASE}/getRsdntrgStatAgeListData`);
     url.searchParams.set("serviceKey", SERVICE_KEY);
     url.searchParams.set("numOfRows", "100");
     url.searchParams.set("pageNo", "1");
@@ -58,48 +60,149 @@ export async function getAgePopulationByRegion(
     if (!res.ok) return null;
 
     const data = await res.json();
-    const items: Array<{ age: string; totalpopulation: string; malePop: string; femalePop: string }> =
-      data?.items?.item ?? [];
-
+    const items: Array<{ age: string; totalpopulation: string }> = data?.items?.item ?? [];
     if (!items.length) return null;
 
-    // 1세 단위 → 10세 단위 집계
-    const buckets = [0, 0, 0, 0, 0, 0, 0, 0]; // 0-9, 10-19, 20-29, 30-39, 40-49, 50-59, 60-69, 70+
+    const buckets = [0, 0, 0, 0, 0, 0, 0, 0];
     let total = 0;
-
     for (const item of items) {
       const age = parseInt(item.age, 10);
       const pop = parseInt(item.totalpopulation, 10) || 0;
       if (isNaN(age) || pop < 0) continue;
       total += pop;
-      const bucketIdx = Math.min(Math.floor(age / 10), 7);
-      buckets[bucketIdx] += pop;
+      buckets[Math.min(Math.floor(age / 10), 7)] += pop;
     }
-
     if (total === 0) return null;
 
-    const [age0s, age10s, age20s, age30s, age40s, age50s, age60s, age70s] = buckets;
-    const youngFamily = age30s + age40s;
-    const chronicPatient = age50s + age60s;
-
-    return {
-      adm_cd: admCd,
-      adm_nm: admNm,
-      age0s,
-      age10s,
-      age20s,
-      age30s,
-      age40s,
-      age50s,
-      age60s,
-      age70s,
-      total,
-      youngFamily,
-      chronicPatient,
-      youngFamilyRatio: Math.round((youngFamily / total) * 100),
-      chronicPatientRatio: Math.round((chronicPatient / total) * 100),
-    };
+    return buildResult(admCd, admNm, buckets, total);
   } catch {
     return null;
   }
+}
+
+// ── 2순위: SGIS 통계청 인구총조사(2020) ─────────────────────────
+async function getSgisToken(): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `${SGIS_BASE}/auth/authentication.json?consumer_key=${SGIS_KEY}&consumer_secret=${SGIS_SECRET}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.result?.accessToken ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// admNm 예: "경기 평택시 비전동" → { sido:"경기", sigungu:"평택시", dong:"비전동" }
+function parseAdmNm(admNm: string): { sido: string; sigungu: string; dong: string } {
+  const parts = admNm.trim().split(/\s+/);
+  return {
+    sido: parts[0] ?? "",
+    sigungu: parts[1] ?? "",
+    dong: parts[2] ?? "",
+  };
+}
+
+async function findSgisCodes(token: string, sido: string, sigungu: string, dong: string): Promise<string[]> {
+  try {
+    // 1단계: 시도 코드
+    const sidoRes = await fetch(`${SGIS_BASE}/addr/stage.json?accessToken=${token}&pg_yn=0`);
+    const sidoData = await sidoRes.json();
+    const sidoItem = (sidoData.result ?? []).find((r: any) =>
+      r.addr_name.replace(/특별시|광역시|특별자치시|특별자치도|도$/, "").includes(
+        sido.replace(/특별시|광역시|특별자치시|특별자치도|도$/, "")
+      )
+    );
+    if (!sidoItem) return [];
+
+    // 2단계: 시군구 코드
+    const sgRes = await fetch(`${SGIS_BASE}/addr/stage.json?accessToken=${token}&cd=${sidoItem.cd}&pg_yn=0`);
+    const sgData = await sgRes.json();
+    const sgItem = (sgData.result ?? []).find((r: any) => r.addr_name.includes(sigungu.replace(/시$|군$|구$/, "")));
+    if (!sgItem) return [];
+
+    // 3단계: 동 코드 (숫자 제거 후 부분 매칭 → 복수 동 지원)
+    const dongRes = await fetch(`${SGIS_BASE}/addr/stage.json?accessToken=${token}&cd=${sgItem.cd}&pg_yn=0`);
+    const dongData = await dongRes.json();
+    const baseDong = dong.replace(/[0-9]/g, "").replace(/동$/, "");
+    const matched = (dongData.result ?? []).filter((r: any) => r.addr_name.includes(baseDong));
+    return matched.length > 0 ? matched.map((r: any) => r.cd) : [sgItem.cd];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchSgisPopulation(admCd: string, admNm: string): Promise<AgePopulation | null> {
+  if (!SGIS_KEY || !SGIS_SECRET) return null;
+
+  const token = await getSgisToken();
+  if (!token) return null;
+
+  const { sido, sigungu, dong } = parseAdmNm(admNm);
+  const codes = await findSgisCodes(token, sido, sigungu, dong);
+  if (!codes.length) return null;
+
+  // 연령대별 × 동코드별 병렬 조회 후 합산
+  const buckets = [0, 0, 0, 0, 0, 0, 0, 0];
+  let total = 0;
+
+  const fetches = codes.flatMap((code) =>
+    SGIS_AGE_TYPES.map((ageType) =>
+      fetch(
+        `${SGIS_BASE}/stats/searchpopulation.json?accessToken=${token}&year=2020&adm_cd=${code}&gender=0&age_type=${ageType}`,
+        { signal: AbortSignal.timeout(6000) }
+      )
+        .then((r) => r.json())
+        .then((d) => ({ ageType, pop: parseInt(d.result?.[0]?.population ?? "0", 10) || 0 }))
+        .catch(() => ({ ageType, pop: 0 }))
+    )
+  );
+
+  const results = await Promise.all(fetches);
+  for (const { ageType, pop } of results) {
+    const idx = ageType - 30; // 30→0, 31→1, ..., 37→7
+    const bucketIdx = Math.min(idx, 7); // 38,39 → bucket 7 (70+)
+    buckets[bucketIdx] += pop;
+    total += pop;
+  }
+
+  if (total === 0) return null;
+
+  return buildResult(admCd, admNm, buckets, total);
+}
+
+// ── 공통 결과 빌더 ────────────────────────────────────────────────
+function buildResult(admCd: string, admNm: string, buckets: number[], total: number): AgePopulation {
+  const [age0s, age10s, age20s, age30s, age40s, age50s, age60s, age70s] = buckets;
+  const youngFamily = age30s + age40s;
+  const chronicPatient = age50s + age60s;
+  return {
+    adm_cd: admCd,
+    adm_nm: admNm,
+    age0s, age10s, age20s, age30s, age40s, age50s, age60s, age70s,
+    total,
+    youngFamily,
+    chronicPatient,
+    youngFamilyRatio: Math.round((youngFamily / total) * 100),
+    chronicPatientRatio: Math.round((chronicPatient / total) * 100),
+  };
+}
+
+// ── 메인 공개 함수 ────────────────────────────────────────────────
+// admCd: Kakao coord2regioncode H-type code (10자리)
+// admNm: "경기 평택시 비전동" 형태
+export async function getAgePopulationByRegion(
+  admCd: string,
+  admNm: string
+): Promise<AgePopulation | null> {
+  if (!admCd && !admNm) return null;
+
+  // 행안부 API 우선 시도
+  const moisResult = await fetchMoisPopulation(admCd, admNm);
+  if (moisResult) return moisResult;
+
+  // 행안부 실패 시 SGIS 폴백
+  return fetchSgisPopulation(admCd, admNm);
 }
