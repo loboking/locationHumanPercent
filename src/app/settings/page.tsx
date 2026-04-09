@@ -1,6 +1,9 @@
-export const metadata = {
-  title: "설정 | 평택 부동산 인사이트",
-};
+"use client";
+
+import { useState } from "react";
+import ApiGuidePage from "@/features/api-guide/ApiGuidePage";
+import { Settings, Key } from "lucide-react";
+import clsx from "clsx";
 
 const API_KEYS = [
   {
@@ -40,21 +43,50 @@ const API_KEYS = [
   },
 ];
 
-export default function SettingsPage() {
-  return (
-    <div className="p-8">
-      <h2 className="text-2xl font-bold text-gray-900">설정</h2>
-      <p className="text-gray-500 mt-1">API 키 관리 — 아래 키들을 <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono">.env.local</code> 파일과 Vercel 환경 변수에 등록하세요</p>
+const TABS = [
+  { id: "env", label: "환경 변수", icon: Settings },
+  { id: "api-guide", label: "API 신청 가이드", icon: Key },
+];
 
-      {/* .env.local 예시 */}
-      <div className="mt-6 bg-gray-900 rounded-xl p-5">
-        <p className="text-xs font-semibold text-gray-400 mb-3">.env.local 파일 형식</p>
-        <pre className="text-xs text-green-400 leading-relaxed overflow-x-auto">{`# 카카오
+export default function SettingsPage() {
+  const [tab, setTab] = useState<"env" | "api-guide">("env");
+
+  return (
+    <div className="p-4 md:p-8">
+      <h2 className="text-xl md:text-2xl font-bold text-gray-900">설정</h2>
+      <p className="text-gray-500 mt-1 text-sm">환경 변수 관리 및 API 신청 가이드</p>
+
+      {/* 탭 */}
+      <div className="flex gap-1 mt-5 border-b border-gray-200">
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id as "env" | "api-guide")}
+            className={clsx(
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors",
+              tab === id
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            )}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* 환경 변수 탭 */}
+      {tab === "env" && (
+        <div className="mt-6 space-y-6">
+          {/* .env.local 예시 */}
+          <div className="bg-gray-900 rounded-xl p-5">
+            <p className="text-xs font-semibold text-gray-400 mb-3">.env.local 파일 형식</p>
+            <pre className="text-xs text-green-400 leading-relaxed overflow-x-auto">{`# 카카오
 NEXT_PUBLIC_KAKAO_MAP_KEY=ff94c0085a1e04d3e0dfb47ec9bdb15a
 KAKAO_REST_API_KEY=530f3a4a86d1ec5863c88d48e92d89ad
 
 # 공공데이터포털 (버스도착정보 + 국토교통부 공동주택)
-PUBLIC_DATA_SERVICE_KEY=bc2af5adcbb51a70a19c736313f49382fa90af12fa9d4193df8296b1389769b8
+PUBLIC_DATA_SERVICE_KEY=bc2af5adcbb51a70a19c736313f49382...
 
 # 경기데이터드림
 GG_POPULATION_API_KEY=beaa0fffbf774c8c83efad06b119fa37
@@ -64,61 +96,69 @@ CRON_SECRET=your-secret-key-here
 
 # Neon PostgreSQL
 DATABASE_URL=postgresql://...`}</pre>
-      </div>
-
-      {/* Vercel 배포 안내 */}
-      <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-5">
-        <h3 className="text-sm font-bold text-amber-800 mb-2">Vercel 환경 변수 등록 방법</h3>
-        <ol className="text-sm text-amber-700 space-y-1.5 list-decimal list-inside">
-          <li>Vercel 대시보드 → 프로젝트 선택 → Settings → Environment Variables</li>
-          <li>위 키들을 하나씩 Key/Value로 추가</li>
-          <li>환경: Production, Preview, Development 모두 체크</li>
-          <li>저장 후 Redeploy 필요</li>
-        </ol>
-      </div>
-
-      {/* 자동 수집 현황 */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-5">
-        <h3 className="text-sm font-bold text-blue-800 mb-2">버스 교통량 자동 수집 (Vercel Cron)</h3>
-        <p className="text-sm text-blue-700">
-          <code className="bg-blue-100 px-1 rounded font-mono">vercel.json</code>에 설정된 Cron Job이 매 정시마다{" "}
-          <code className="bg-blue-100 px-1 rounded font-mono">/api/collect</code>를 호출해 DB에 버스 데이터를 자동 저장합니다.
-        </p>
-        <div className="mt-3 text-xs text-blue-600 space-y-1">
-          <p>• 수동 수집: <code className="bg-blue-100 px-1 rounded font-mono">curl /api/collect?secret=CRON_SECRET</code></p>
-          <p>• 로컬 테스트: <code className="bg-blue-100 px-1 rounded font-mono">npm run collect</code> (node-cron 방식)</p>
-          <p>• Vercel Hobby 플랜: 1개 Cron 무료 지원</p>
-        </div>
-      </div>
-
-      {/* 키 목록 */}
-      <div className="mt-6 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-700">API 키 목록</h3>
-        {API_KEYS.map((field) => (
-          <div key={field.envKey} className="bg-white rounded-xl border border-gray-200 p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <label className="block text-sm font-semibold text-gray-700">{field.label}</label>
-                <code className="text-xs text-gray-400 font-mono">{field.envKey}</code>
-                <p className="text-xs text-gray-400 mt-1">{field.hint}</p>
-              </div>
-              <a
-                href={field.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-blue-600 hover:text-blue-800 shrink-0 mt-1"
-              >
-                발급 →
-              </a>
-            </div>
-            <input
-              type="password"
-              placeholder={field.placeholder}
-              className="mt-3 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
           </div>
-        ))}
-      </div>
+
+          {/* Vercel 배포 안내 */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+            <h3 className="text-sm font-bold text-amber-800 mb-2">Vercel 환경 변수 등록 방법</h3>
+            <ol className="text-sm text-amber-700 space-y-1.5 list-decimal list-inside">
+              <li>Vercel 대시보드 → 프로젝트 선택 → Settings → Environment Variables</li>
+              <li>위 키들을 하나씩 Key/Value로 추가</li>
+              <li>환경: Production, Preview, Development 모두 체크</li>
+              <li>저장 후 Redeploy 필요</li>
+            </ol>
+          </div>
+
+          {/* 자동 수집 현황 */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+            <h3 className="text-sm font-bold text-blue-800 mb-2">버스 교통량 자동 수집 (GitHub Actions)</h3>
+            <p className="text-sm text-blue-700">
+              <code className="bg-blue-100 px-1 rounded font-mono">.github/workflows/collect-hourly.yml</code>이 매 정시마다{" "}
+              <code className="bg-blue-100 px-1 rounded font-mono">/api/collect</code>를 호출해 DB에 버스 데이터를 자동 저장합니다.
+            </p>
+            <div className="mt-3 text-xs text-blue-600 space-y-1">
+              <p>• 수동 수집: <code className="bg-blue-100 px-1 rounded font-mono">curl /api/collect?secret=CRON_SECRET</code></p>
+              <p>• 로컬 테스트: <code className="bg-blue-100 px-1 rounded font-mono">npm run collect</code></p>
+            </div>
+          </div>
+
+          {/* 키 목록 */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-gray-700">API 키 목록</h3>
+            {API_KEYS.map((field) => (
+              <div key={field.envKey} className="bg-white rounded-xl border border-gray-200 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <label className="block text-sm font-semibold text-gray-700">{field.label}</label>
+                    <code className="text-xs text-gray-400 font-mono">{field.envKey}</code>
+                    <p className="text-xs text-gray-400 mt-1">{field.hint}</p>
+                  </div>
+                  <a
+                    href={field.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:text-blue-800 shrink-0 mt-1"
+                  >
+                    발급 →
+                  </a>
+                </div>
+                <input
+                  type="password"
+                  placeholder={field.placeholder}
+                  className="mt-3 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* API 신청 가이드 탭 */}
+      {tab === "api-guide" && (
+        <div className="mt-2 -mx-4 md:-mx-8">
+          <ApiGuidePage />
+        </div>
+      )}
     </div>
   );
 }

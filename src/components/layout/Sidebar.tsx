@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Key, BarChart2, MapPin, Bus, History, Settings } from "lucide-react";
+import { LayoutDashboard, BarChart2, MapPin, Bus, History, Settings } from "lucide-react";
 import clsx from "clsx";
 
 const NAV_ITEMS = [
@@ -11,14 +11,12 @@ const NAV_ITEMS = [
   { href: "/analytics/commerce", label: "상권", icon: MapPin },
   { href: "/analytics/transport", label: "교통", icon: Bus },
   { href: "/analytics/bus-history", label: "이력", icon: History },
-  { href: "/api-guide", label: "API", icon: Key },
   { href: "/settings", label: "설정", icon: Settings },
 ];
 
 // 데스크탑에서 보여줄 전체 메뉴
 const FULL_NAV_ITEMS = [
   { href: "/", label: "대시보드", icon: LayoutDashboard },
-  { href: "/api-guide", label: "API 신청 가이드", icon: Key },
   { href: "/analytics/foottraffic", label: "유동인구 추정", icon: BarChart2 },
   { href: "/analytics/commerce", label: "상권 매출 분석", icon: MapPin },
   { href: "/analytics/transport", label: "실시간 교통", icon: Bus },

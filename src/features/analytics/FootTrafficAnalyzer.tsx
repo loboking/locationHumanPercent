@@ -4,13 +4,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Script from "next/script";
 import {
   Search, MapPin, TrendingUp, Bus, Utensils, Coffee, ShoppingBag,
-  Loader2, Home, BarChart2, Building2, Plus, Trash2, Settings, X
+  Loader2, Home, BarChart2, Building2, Plus, Trash2, Settings, X, ParkingSquare
 } from "lucide-react";
 import clsx from "clsx";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
-import { MOCK_COMMERCE } from "@/infrastructure/api/mock-data";
 
 declare global { interface Window { kakao: any } }
 
@@ -36,15 +35,43 @@ interface EstimateResult {
   radius: number;
   isochrone: { polygon: [number, number][]; areaM2: number; mode: string; minutes: number } | null;
   busStopSource: "kakao" | "fallback";
+  dataQuality: {
+    confidence: "high" | "medium" | "low";
+    realDataRatio: number;
+    sources: {
+      restaurant: "soho" | "kakao";
+      busStop: "kakao" | "fallback";
+      trafficHistory: "db" | "db_partial" | "none";
+      isochrone: "valhalla" | "circle_fallback";
+    };
+  };
   estimate: {
     score: number;
+    overScore: number;
     grade: string;
     busStopCount: number;
     restaurantCount: number;
     cafeCount: number;
     convStoreCount: number;
+    parkingCount: number;
     totalHouseholds: number;
-    detail: { transitScore: number; commerceScore: number; residentialScore: number };
+    detail: {
+      transitScore: number;
+      mobilityScore: number;
+      busScore: number;
+      parkingScore: number;
+      commerceScore: number;
+      residentialScore: number;
+    };
+    density: {
+      areaKm2: number;
+      restaurantPer1km2: number;
+      cafePer1km2: number;
+      convPer1km2: number;
+      restaurantRatio: number;
+      cafeRatio: number;
+      convRatio: number;
+    };
   };
   nearby: {
     busStops: { name: string; distance: number; lat?: number; lng?: number }[];
@@ -526,7 +553,14 @@ export default function FootTrafficAnalyzer() {
                 <div className="mt-3">
                   <div className="flex justify-between text-sm mb-1">
                     <span className="font-medium text-gray-700">유동인구 추정 점수</span>
-                    <span className="font-bold text-gray-900">{result.estimate.score} / 100</span>
+                    <div className="flex items-center gap-2">
+                      {result.estimate.overScore > 0 && (
+                        <span className="text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                          +{result.estimate.overScore} 초과
+                        </span>
+                      )}
+                      <span className="font-bold text-gray-900">{result.estimate.score} / 100</span>
+                    </div>
                   </div>
                   <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                     <div
@@ -534,6 +568,11 @@ export default function FootTrafficAnalyzer() {
                       style={{ width: `${result.estimate.score}%` }}
                     />
                   </div>
+                  {result.estimate.overScore > 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      기준치 100점을 초과하는 고밀도 지역입니다. 상권 포화 가능성을 검토하세요.
+                    </p>
+                  )}
                 </div>
 
                 <div className="mt-3 grid grid-cols-3 gap-2">
@@ -543,6 +582,11 @@ export default function FootTrafficAnalyzer() {
                       {result.estimate.detail.transitScore}
                       <span className="text-xs font-normal text-blue-400"> / 25</span>
                     </p>
+                    <div className="mt-1 space-y-0.5 text-[10px] text-blue-500">
+                      <div className="flex justify-between"><span>이동범위</span><span>{result.estimate.detail.mobilityScore}/12</span></div>
+                      <div className="flex justify-between"><span>버스정류장</span><span>{result.estimate.detail.busScore}/8</span></div>
+                      <div className="flex justify-between"><span>주차장</span><span>{result.estimate.detail.parkingScore}/5</span></div>
+                    </div>
                   </div>
                   <div className="bg-violet-50 rounded-lg p-2.5">
                     <p className="text-xs text-violet-600 font-medium">상권 활성도</p>
@@ -550,6 +594,7 @@ export default function FootTrafficAnalyzer() {
                       {result.estimate.detail.commerceScore}
                       <span className="text-xs font-normal text-violet-400"> / 45</span>
                     </p>
+                    <p className="mt-1 text-[10px] text-violet-400">밀도 기반</p>
                   </div>
                   <div className="bg-emerald-50 rounded-lg p-2.5">
                     <p className="text-xs text-emerald-600 font-medium">주거 밀도</p>
@@ -561,12 +606,23 @@ export default function FootTrafficAnalyzer() {
                 </div>
               </div>
 
-              {/* 상권 매출 분석 (Kakao 시설 수 + MOCK 매출 추정) */}
+              {/* 상권 분석 */}
               <div className="bg-white rounded-xl border border-gray-200 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <Building2 size={15} className="text-violet-500" />
                     <p className="text-sm font-semibold text-gray-700">상권 분석</p>
+                    {/* 신뢰도 배지 */}
+                    {result.dataQuality && (
+                      <span className={clsx("text-xs px-1.5 py-0.5 rounded font-medium", {
+                        "bg-emerald-100 text-emerald-700": result.dataQuality.confidence === "high",
+                        "bg-yellow-100 text-yellow-700": result.dataQuality.confidence === "medium",
+                        "bg-red-100 text-red-600": result.dataQuality.confidence === "low",
+                      })}>
+                        {result.dataQuality.confidence === "high" ? "🟢 실측" :
+                         result.dataQuality.confidence === "medium" ? "🟡 추정" : "🔴 추정"}
+                      </span>
+                    )}
                   </div>
                   {result.isochrone ? (
                     <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
@@ -578,28 +634,63 @@ export default function FootTrafficAnalyzer() {
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
-                    { icon: Bus, label: "버스 정류장", value: result.estimate.busStopCount, color: "text-blue-600 bg-blue-50", noKakao: result.busStopSource === "fallback", badge: null },
-                    { icon: Utensils, label: "음식점", value: result.estimate.restaurantCount, color: "text-orange-600 bg-orange-50", noKakao: false, badge: result.nearby.restaurantSource === "soho" ? "소상공인DB" : null },
-                    { icon: Coffee, label: "카페", value: result.estimate.cafeCount, color: "text-amber-600 bg-amber-50", noKakao: false, badge: null },
-                    { icon: ShoppingBag, label: "편의점", value: result.estimate.convStoreCount, color: "text-emerald-600 bg-emerald-50", noKakao: false, badge: null },
-                  ].map(({ icon: Icon, label, value, color, noKakao, badge }) => (
+                    { icon: Bus, label: "버스 정류장", value: result.estimate.busStopCount, color: "text-blue-600 bg-blue-50", sub: result.busStopSource === "fallback" ? "카카오 미등록" : "카카오 실측" },
+                    { icon: Utensils, label: "음식점", value: result.estimate.restaurantCount, color: "text-orange-600 bg-orange-50", sub: result.dataQuality?.sources.restaurant === "soho" ? "✓ 소상공인DB" : "카카오 검색" },
+                    { icon: Coffee, label: "카페", value: result.estimate.cafeCount, color: "text-amber-600 bg-amber-50", sub: "카카오 검색" },
+                    { icon: ShoppingBag, label: "편의점", value: result.estimate.convStoreCount, color: "text-emerald-600 bg-emerald-50", sub: "카카오 검색" },
+                    { icon: ParkingSquare, label: "주차장", value: result.estimate.parkingCount, color: "text-indigo-600 bg-indigo-50", sub: "카카오 검색" },
+                  ].map(({ icon: Icon, label, value, color, sub }) => (
                     <div key={label} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2.5">
                       <div className={clsx("p-1 rounded-lg", color.split(" ")[1])}>
                         <Icon size={14} className={color.split(" ")[0]} />
                       </div>
                       <div>
                         <p className="text-xs text-gray-500">{label}</p>
-                        <p className="font-bold text-gray-900 text-sm">{value}개</p>
-                        {badge && (
-                          <p className="text-xs text-emerald-600 font-medium mt-0.5">✓ {badge}</p>
-                        )}
-                        {noKakao && (
-                          <p className="text-xs text-amber-500 mt-0.5">카카오 미등록 지역</p>
-                        )}
+                        <p className="font-bold text-gray-900 text-sm">{value.toLocaleString()}개</p>
+                        <p className={clsx("text-xs mt-0.5", sub.startsWith("✓") ? "text-emerald-600 font-medium" : "text-gray-400")}>{sub}</p>
                       </div>
                     </div>
                   ))}
                 </div>
+                {/* 밀도 배율 (기준 대비) */}
+                {result.estimate.density && (
+                  <div className="mb-3 bg-gray-50 rounded-lg p-2.5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-semibold text-gray-600">상권 밀도 (기준 대비 배율)</p>
+                      <span className="text-xs text-gray-400">{result.estimate.density.areaKm2}km²</span>
+                    </div>
+                    <div className="space-y-1">
+                      {[
+                        { label: "음식점", density: result.estimate.density.restaurantPer1km2, ratio: result.estimate.density.restaurantRatio, base: 50, color: "#f97316" },
+                        { label: "카페",   density: result.estimate.density.cafePer1km2,       ratio: result.estimate.density.cafeRatio,       base: 20, color: "#8b5cf6" },
+                        { label: "편의점", density: result.estimate.density.convPer1km2,       ratio: result.estimate.density.convRatio,        base: 7,  color: "#10b981" },
+                      ].map(({ label, density, ratio, base, color }) => (
+                        <div key={label} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500 w-10 shrink-0">{label}</span>
+                          <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-visible relative">
+                            <div
+                              className="h-1.5 rounded-full"
+                              style={{ width: `${Math.min(ratio * 100, 100)}%`, background: color }}
+                            />
+                            {ratio > 1 && (
+                              <div
+                                className="absolute top-0 h-1.5 rounded-full opacity-40"
+                                style={{ left: "100%", width: `${Math.min((ratio - 1) * 100, 50)}%`, background: color }}
+                              />
+                            )}
+                          </div>
+                          <span className={clsx(
+                            "text-xs font-bold w-10 text-right shrink-0",
+                            ratio >= 1.5 ? "text-orange-600" : ratio >= 1.0 ? "text-emerald-600" : "text-gray-400"
+                          )}>
+                            {ratio.toFixed(1)}배
+                          </span>
+                          <span className="text-xs text-gray-400 w-16 shrink-0">{density}/{base}/km²</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {/* 업종 분포 미니 차트 */}
                 {commerceChartData.some((d) => d.value > 0) && (
                   <ResponsiveContainer width="100%" height={80}>
@@ -615,17 +706,6 @@ export default function FootTrafficAnalyzer() {
                     </BarChart>
                   </ResponsiveContainer>
                 )}
-                {/* 지역 전체 상권 매출 참고 (MOCK) */}
-                <div className="mt-2 border-t border-gray-100 pt-2">
-                  <p className="text-xs text-gray-400 mb-1">고덕동 권역 추정 월 매출 (참고)</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {MOCK_COMMERCE.map((d) => (
-                      <span key={d.category} className="text-xs bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">
-                        {d.category} {(d.monthlyRevenue / 1000000).toFixed(0)}백만
-                      </span>
-                    ))}
-                  </div>
-                </div>
               </div>
 
               {/* 교통량 이력 */}

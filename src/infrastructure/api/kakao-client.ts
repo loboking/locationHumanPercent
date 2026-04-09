@@ -38,12 +38,14 @@ export interface KakaoPlace {
 }
 
 // 반경 내 카테고리 장소 전체 조회 (페이지네이션, 최대 3페이지=45개)
+// totalCount: Kakao meta.total_count (실제 전체 개수, 45개 상한 없음) → 점수 계산용
 export async function searchNearbyPlaces(
   lat: number,
   lng: number,
   categoryCode: string,
   radius = 500
-): Promise<KakaoPlace[]> {
+): Promise<{ places: KakaoPlace[]; totalCount: number }> {
+  let totalCount = 0;
   const all: KakaoPlace[] = [];
   for (let page = 1; page <= 3; page++) {
     const params = new URLSearchParams({
@@ -58,6 +60,7 @@ export async function searchNearbyPlaces(
       headers: { Authorization: `KakaoAK ${REST_KEY}` },
     });
     const data = await res.json();
+    if (page === 1) totalCount = data.meta?.total_count ?? 0;
     const places = (data.documents ?? []).map((d: any) => ({
       id: d.id,
       placeName: d.place_name,
@@ -69,7 +72,7 @@ export async function searchNearbyPlaces(
     all.push(...places);
     if (data.meta?.is_end) break;
   }
-  return all;
+  return { places: all, totalCount };
 }
 
 // 반경 내 카테고리 장소 검색 - total_count 반환
@@ -193,17 +196,31 @@ export async function searchApartmentCount(
 // 유동인구 추정 점수 계산
 // 교통(25점) + 상권(45점) + 주거(30점) = 100점
 export interface FootTrafficEstimate {
-  score: number;
+  score: number;          // 100점 만점 (기준치 cap 적용)
+  overScore: number;      // 100 초과 원점수 (포화도 지수, 0이면 기준 이하)
   grade: "매우높음" | "높음" | "보통" | "낮음";
   busStopCount: number;
   restaurantCount: number;
   cafeCount: number;
   convStoreCount: number;
+  parkingCount: number;
   totalHouseholds: number;
   detail: {
     transitScore: number;
+    mobilityScore: number;
+    busScore: number;
+    parkingScore: number;
     commerceScore: number;
     residentialScore: number;
+  };
+  density: {
+    areaKm2: number;          // 분석 면적 (km²)
+    restaurantPer1km2: number; // 음식점 밀도
+    cafePer1km2: number;       // 카페 밀도
+    convPer1km2: number;       // 편의점 밀도
+    restaurantRatio: number;   // 기준 대비 배율 (1.0 = 기준치)
+    cafeRatio: number;
+    convRatio: number;
   };
 }
 
@@ -214,34 +231,61 @@ export function calcFootTrafficEstimate(
   convStores: number,
   aptComplexCount = 0,
   radius = 500,
-  isochroneAreaM2?: number  // 이소크론 실제 면적 (있으면 우선 사용)
+  isochroneAreaM2?: number,
+  parkingCount = 0,
+  isoMode: "car" | "walk" = "car"
 ): FootTrafficEstimate {
-  // 이소크론 면적 있으면 실제 면적 기준, 없으면 원형 반경 기준
-  const circleAreaM2 = Math.PI * 500 * 500; // 500m 원 기준면적
-  const areaFactor = isochroneAreaM2
-    ? isochroneAreaM2 / circleAreaM2
-    : (radius / 500) ** 2;
+  // 면적(km²) 계산: 이소크론 있으면 실측, 없으면 반경 원
+  const areaKm2 = isochroneAreaM2
+    ? isochroneAreaM2 / 1_000_000
+    : Math.PI * (radius / 1000) ** 2;
 
-  // 교통 접근성 (25점): 반경 무관 고정 — 버스정류장은 밀도가 아닌 접근성 개념
-  // 1개=5점, 5개 이상=만점 (반경을 넓혀도 같은 정류장이면 동일 점수 유지)
-  const transitScore = Math.min(busStops * 5, 25);
+  // ── 교통 접근성 (25점) ─────────────────────────────────────
+  // 이동 접근성 (12점): 이소크론 면적 기반 — 실제 이동 가능 범위 측정
+  // 차로 5분 ≈ 3-5km², 차로 10분 ≈ 6-10km², 도보 10분 ≈ 0.3-0.8km²
+  let mobilityScore: number;
+  if (isochroneAreaM2) {
+    mobilityScore = areaKm2 >= 5 ? 12 : areaKm2 >= 2 ? 10 : areaKm2 >= 0.5 ? 7 : 4;
+  } else {
+    // 이소크론 없을 때 반경 기반 폴백
+    mobilityScore = radius >= 1000 ? 10 : radius >= 500 ? 7 : 4;
+  }
+  // 버스 접근성 (8점): 1개당 2점, 4개 이상=만점
+  const busScore = Math.min(busStops * 2, 8);
+  // 주차 접근성 (5점): 주차장 1개당 1점, 5개=만점
+  const parkingScore = Math.min(parkingCount, 5);
+  const transitScore = mobilityScore + busScore + parkingScore;
 
-  // 상권 활성도 (45점) — 반경 면적에 비례한 만점 기준
-  const rMax = Math.max(1, Math.round(30 * areaFactor));  // 500m=30개
-  const cMax = Math.max(1, Math.round(20 * areaFactor));  // 500m=20개
-  const sMax = Math.max(1, Math.round(7  * areaFactor));  // 500m=7개
-  const rScore = Math.min((restaurants / rMax) * 20, 20);
-  const cScore = Math.min((cafes      / cMax) * 15, 15);
-  const sScore = Math.min((convStores / sMax) * 10, 10);
+  // ── 상권 활성도 (45점) — 밀도(개수/km²) 기반 ────────────────
+  // 전국 도심 평균 밀도 기준: 음식점 50/km², 카페 20/km², 편의점 7/km²
+  const rDensity = areaKm2 > 0 ? restaurants / areaKm2 : 0;
+  const cDensity = areaKm2 > 0 ? cafes / areaKm2 : 0;
+  const sDensity = areaKm2 > 0 ? convStores / areaKm2 : 0;
+  const rRatio = rDensity / 50;
+  const cRatio = cDensity / 20;
+  const sRatio = sDensity / 7;
+  // 원점수 (cap 없음) — 오버 지수 계산용
+  const rawRScore = rRatio * 20;
+  const rawCScore = cRatio * 15;
+  const rawSScore = sRatio * 10;
+  const rawCommerceScore = rawRScore + rawCScore + rawSScore;
+  // cap 적용 점수 — 메인 점수용
+  const rScore = Math.min(rawRScore, 20);
+  const cScore = Math.min(rawCScore, 15);
+  const sScore = Math.min(rawSScore, 10);
   const commerceScore = Math.round(rScore + cScore + sScore);
 
-  // 주거 밀도 (30점): 반경 면적에 비례
-  const aptMax = Math.max(1, Math.round(10 * areaFactor)); // 500m=10단지
+  // ── 주거 밀도 (30점) — 반경 면적 비례 ───────────────────────
+  const circleAreaM2 = Math.PI * 500 * 500;
+  const rawAreaFactor = isochroneAreaM2 ? isochroneAreaM2 / circleAreaM2 : (radius / 500) ** 2;
+  const areaFactor = Math.min(rawAreaFactor, 4);
+  const aptMax = Math.max(1, Math.round(10 * areaFactor));
   const residentialScore = Math.min(Math.round((aptComplexCount / aptMax) * 30), 30);
-  // 세대수 추정 (단지당 평균 700세대)
   const totalHouseholds = aptComplexCount * 700;
 
-  const score = Math.min(Math.round(transitScore + commerceScore + residentialScore), 100);
+  const rawTotal = transitScore + rawCommerceScore + residentialScore;
+  const score = Math.min(Math.round(rawTotal), 100);
+  const overScore = Math.max(0, Math.round(rawTotal - 100));
 
   const grade =
     score >= 70 ? "매우높음" :
@@ -250,12 +294,23 @@ export function calcFootTrafficEstimate(
 
   return {
     score,
+    overScore,
     grade,
     busStopCount: busStops,
     restaurantCount: restaurants,
     cafeCount: cafes,
     convStoreCount: convStores,
+    parkingCount,
     totalHouseholds,
-    detail: { transitScore, commerceScore, residentialScore },
+    detail: { transitScore, mobilityScore, busScore, parkingScore, commerceScore, residentialScore },
+    density: {
+      areaKm2: Math.round(areaKm2 * 100) / 100,
+      restaurantPer1km2: Math.round(rDensity),
+      cafePer1km2: Math.round(cDensity),
+      convPer1km2: Math.round(sDensity * 10) / 10,
+      restaurantRatio: Math.round(rRatio * 10) / 10,
+      cafeRatio: Math.round(cRatio * 10) / 10,
+      convRatio: Math.round(sRatio * 10) / 10,
+    },
   };
 }

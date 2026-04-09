@@ -75,29 +75,32 @@ export async function GET(req: NextRequest) {
   const isochrone = await getIsochrone(lat, lng, isoMode, isoMinutes);
   const searchRadius = isochrone ? isochrone.boundingRadius : radius;
 
-  // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB + 아파트
-  const [busResult, restaurantPlaces, cafePlaces, convPlaces, aptResult, sohoResult] = await Promise.all([
+  // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB + 아파트 + 주차장
+  const [busResult, restaurantData, cafeData, convData, aptResult, sohoResult, parkingData] = await Promise.all([
     searchBusStopsCount(lat, lng, isochrone ? Math.min(searchRadius, 2000) : radius),
-    searchNearbyPlaces(lat, lng, "FD6", searchRadius), // 음식점 (좌표 포함)
-    searchNearbyPlaces(lat, lng, "CE7", searchRadius), // 카페 (좌표 포함)
-    searchNearbyPlaces(lat, lng, "CS2", searchRadius), // 편의점 (좌표 포함)
+    searchNearbyPlaces(lat, lng, "FD6", searchRadius), // 음식점
+    searchNearbyPlaces(lat, lng, "CE7", searchRadius), // 카페
+    searchNearbyPlaces(lat, lng, "CS2", searchRadius), // 편의점
     searchApartmentCount(lat, lng, searchRadius),
     searchSohoRestaurantCount(lat, lng, searchRadius),
+    searchNearbyCount(lat, lng, "PK6", searchRadius),  // 주차장
   ]);
 
-  // 이소크론 폴리곤으로 필터링 (없으면 반경 내 전체)
+  // 이소크론 폴리곤으로 필터링 (지도 표시용, max 45개 한계 있음)
   const filterByIsochrone = <T extends { lat: number; lng: number }>(places: T[]): T[] =>
     isochrone
       ? places.filter((p) => isPointInPolygon(p.lng, p.lat, isochrone.polygon))
       : places;
 
-  const restaurantFiltered = filterByIsochrone(restaurantPlaces);
-  const cafeFiltered       = filterByIsochrone(cafePlaces);
-  const convFiltered       = filterByIsochrone(convPlaces);
+  const restaurantFiltered = filterByIsochrone(restaurantData.places);
+  const cafeFiltered       = filterByIsochrone(cafeData.places);
+  const convFiltered       = filterByIsochrone(convData.places);
 
-  const restaurantResult = { totalCount: restaurantFiltered.length, places: restaurantFiltered };
-  const cafeResult       = { totalCount: cafeFiltered.length,       places: cafeFiltered };
-  const convResult       = { totalCount: convFiltered.length,       places: convFiltered };
+  // 점수 계산용: Kakao meta.total_count (실제 전체 개수, 45개 상한 없음)
+  // 폴리곤 필터 후 45개 상한에 걸려 rMax 대비 과소 카운트되는 버그 방지
+  const restaurantResult = { totalCount: restaurantData.totalCount, places: restaurantFiltered };
+  const cafeResult       = { totalCount: cafeData.totalCount,       places: cafeFiltered };
+  const convResult       = { totalCount: convData.totalCount,       places: convFiltered };
 
   // 버스정류장 폴백: Kakao 미인덱스 지역은 PYEONGTAEK_STATIONS 거리 계산
   const kakaoHasBusData = busResult.totalCount > 0;
@@ -105,7 +108,7 @@ export async function GET(req: NextRequest) {
   const stationsInRadius = PYEONGTAEK_STATIONS.filter((s) => {
     const coord = STATION_COORDS[s.id];
     if (!coord) return false;
-    return haversineKm(lat, lng, coord.lat, coord.lng) <= radius / 1000;
+    return haversineKm(lat, lng, coord.lat, coord.lng) <= searchRadius / 1000;
   });
   if (busStopCount === 0 && stationsInRadius.length > 0) {
     busStopCount = stationsInRadius.length;
@@ -156,8 +159,21 @@ export async function GET(req: NextRequest) {
     convResult.totalCount,
     aptResult.totalCount,
     radius,
-    isochrone?.areaM2
+    isochrone?.areaM2,
+    parkingData.totalCount,
+    isoMode
   );
+
+  // 데이터 신뢰도 평가 (Phase 1: 실데이터 비율 산출)
+  const realDataSources = [
+    busStopCount > 0,                        // 버스정류장: 실측
+    sohoResult.totalCount > 0,               // 소상공인 DB: 실측 (영업중)
+    trafficHistory.length >= 24,             // 버스 이력: 충분한 실측 데이터
+  ].filter(Boolean).length;
+  const realDataRatio = realDataSources / 3;
+  const confidence =
+    realDataRatio >= 0.8 ? "high" :
+    realDataRatio >= 0.5 ? "medium" : "low";
 
   return NextResponse.json({
     address: resolvedAddress,
@@ -168,6 +184,16 @@ export async function GET(req: NextRequest) {
       : null,
     estimate,
     busStopSource: kakaoHasBusData ? "kakao" : "fallback",
+    dataQuality: {
+      confidence,
+      realDataRatio: Math.round(realDataRatio * 100),
+      sources: {
+        restaurant: sohoResult.totalCount > 0 ? "soho" : "kakao",
+        busStop: kakaoHasBusData ? "kakao" : "fallback",
+        trafficHistory: trafficHistory.length >= 24 ? "db" : trafficHistory.length > 0 ? "db_partial" : "none",
+        isochrone: isochrone ? "valhalla" : "circle_fallback",
+      },
+    },
     nearby: {
       busStops: [
         ...busResult.places.slice(0, 3).map((s) => ({ name: s.placeName, distance: s.distance, lat: s.lat, lng: s.lng })),

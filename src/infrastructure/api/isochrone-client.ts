@@ -21,17 +21,17 @@ export async function getIsochrone(
 ): Promise<IsochroneResult | null> {
   const costing = mode === "car" ? "auto" : "pedestrian";
 
-  // 도심 보정: Valhalla는 도로 제한속도 기준이라 신호/정체 미반영
-  // 한국 도심 실제 평균속도 ≈ 제한속도의 60~70%
-  // → 요청 시간을 0.65 배로 축소해 현실적인 커버 범위 산출
-  // 예) 차로 5분 → 3.25분 요청 ≈ 실제 도심 5분 이동 거리
-  //     차로 10분 → 6.5분 요청 ≈ 실제 도심 10분 이동 거리
-  const urbanFactor = mode === "car" ? 0.65 : 1.0;
+  // 도심 보정: Valhalla 자유주행/자유보행 속도 → 실제 도심 속도 보정
+  // 차로: 고덕동 신도시 기준, 제한속도 대비 실제 주행 ≈ 73%
+  //   예) 차로 5분 → 3.65분 요청, 차로 10분 → 7.3분 요청
+  // 도보: 4.5km/h 자유보행 → 신호대기·횡단보도 포함 실제 ≈ 80%
+  //   예) 도보 10분 → 8분 요청 ≈ 실제 도심 10분 보행 거리
+  const urbanFactor = mode === "car" ? 0.73 : 0.80;
   const adjustedMinutes = Math.max(1, Math.round(minutes * urbanFactor * 10) / 10);
 
   const costingOptions = mode === "car"
     ? { auto: { use_highways: 0.1 } }
-    : { pedestrian: { walking_speed: 4.5 } };
+    : { pedestrian: { walking_speed: 3.5 } }; // 실제 도심 평균 보행속도 (신호대기 미포함)
 
   try {
     const res = await fetch(VALHALLA_URL, {
@@ -53,7 +53,7 @@ export async function getIsochrone(
 
     const polygon: [number, number][] = feature.geometry.coordinates[0];
     const areaM2 = calcPolygonAreaM2(polygon);
-    const boundingRadius = calcBoundingRadius(lat, lng, polygon);
+    const boundingRadius = calcBoundingRadius(areaM2);
 
     return { polygon, areaM2, mode, minutes, boundingRadius };
   } catch {
@@ -75,26 +75,12 @@ function calcPolygonAreaM2(coords: [number, number][]): number {
   return Math.abs(area / 2) * mPerDegLat * mPerDegLng;
 }
 
-// 중심점으로부터 폴리곤 꼭짓점까지 최대 거리 (Kakao 검색 반경용)
-function calcBoundingRadius(
-  centerLat: number,
-  centerLng: number,
-  polygon: [number, number][]
-): number {
-  const R = 6371000;
-  let maxDist = 0;
-  for (const [pLng, pLat] of polygon) {
-    const dLat = ((pLat - centerLat) * Math.PI) / 180;
-    const dLng = ((pLng - centerLng) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos((centerLat * Math.PI) / 180) *
-        Math.cos((pLat * Math.PI) / 180) *
-        Math.sin(dLng / 2) ** 2;
-    const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    if (dist > maxDist) maxDist = dist;
-  }
-  return Math.min(Math.ceil(maxDist), 5000); // Kakao 최대 5000m
+// 이소크론 면적 기반 등가 반경 × 1.5 (Kakao 검색 반경용)
+// max vertex distance 대신 면적 기반으로 계산해 과대 산출 방지
+// 차로 5분 (~2km²) → ~1200m, 차로 10분 (~8km²) → ~2400m
+function calcBoundingRadius(areaM2: number): number {
+  const equivalentRadius = Math.sqrt(areaM2 / Math.PI);
+  return Math.min(Math.ceil(equivalentRadius * 1.5), 3000);
 }
 
 // 점이 폴리곤 안에 있는지 (Ray Casting)
