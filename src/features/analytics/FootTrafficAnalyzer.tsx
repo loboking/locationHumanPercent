@@ -495,9 +495,13 @@ export default function FootTrafficAnalyzer() {
               )}
             </div>
           </div>
-          {result?.isochrone && (
+          {result?.isochrone ? (
             <p className="text-white/50 text-[10px] mt-1">
               {result.isochrone.mode === "car" ? "차로" : "도보"} {result.isochrone.minutes}분 · {(result.isochrone.areaM2 / 1_000_000).toFixed(2)} km² · 실도로망 기반
+            </p>
+          ) : result && (
+            <p className="text-amber-300/80 text-[10px] mt-1">
+              ⚠ 도로망 분석 실패 · 1km 원형 추정 (점수 -25%)
             </p>
           )}
         </div>
@@ -707,9 +711,13 @@ export default function FootTrafficAnalyzer() {
                 </div>
 
                 {/* 이소크론 메타 */}
-                {result.isochrone && (
+                {result.isochrone ? (
                   <p className="text-[10px] text-slate-400 mt-1.5">
                     {result.isochrone.mode === "car" ? "차로" : "도보"} {result.isochrone.minutes}분 &middot; {(result.isochrone.areaM2 / 1_000_000).toFixed(2)} km² &middot; 실도로망 기반
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    ⚠ 도로망 분석 실패 · 1km 원형 추정 · 점수 신뢰도 제한
                   </p>
                 )}
 
@@ -849,7 +857,7 @@ export default function FootTrafficAnalyzer() {
                       <span className="text-xs font-normal text-slate-500"> km²</span>
                     </p>
                     <p className="text-[9px] text-slate-400 mt-0.5">
-                      {result.dataQuality?.sources.isochrone === "valhalla" ? "Valhalla 도로망" : "반경 원 추정"}
+                      {result.dataQuality?.sources.isochrone === "valhalla" ? "Valhalla 실도로망" : "⚠ 원형 추정 (점수 ×0.75)"}
                     </p>
                   </div>
                   {/* 거주인구 */}
