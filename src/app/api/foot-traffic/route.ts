@@ -88,11 +88,16 @@ export async function GET(req: NextRequest) {
     moisAdmCd ? getWorkersByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     getTmapTrafficScore(lat, lng, 1),
   ]);
-  const searchRadius = isochrone ? isochrone.boundingRadius : radius;
+  // 이소크론 실패 시 차량 모드는 1000m 폴백 (이소크론 평균 boundingRadius ~1200m와 유사)
+  // 신도시처럼 OSM 도로망이 미완성인 지역에서 500m 기본값으로 인한 과소 평가 방지
+  const carFallbackRadius = isoMode === "car" ? 1000 : 500;
+  const searchRadius = isochrone ? isochrone.boundingRadius : Math.max(radius, carFallbackRadius);
+  // 점수 계산용 반경: 이소크론 없으면 차량 모드 1000m, 도보 500m 사용
+  const scoreRadius = isochrone ? radius : Math.max(radius, carFallbackRadius);
 
   // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB + 아파트 + 주차장 + 병원 + 경쟁약국
   const [busResult, restaurantData, cafeData, convData, aptResult, sohoResult, parkingData, hospitalResult, pharmacyCompResult] = await Promise.all([
-    searchBusStopsCount(lat, lng, isochrone ? Math.min(searchRadius, 2000) : radius),
+    searchBusStopsCount(lat, lng, isochrone ? Math.min(searchRadius, 2000) : searchRadius),
     searchNearbyPlaces(lat, lng, "FD6", searchRadius), // 음식점
     searchNearbyPlaces(lat, lng, "CE7", searchRadius), // 카페
     searchNearbyPlaces(lat, lng, "CS2", searchRadius), // 편의점
@@ -198,7 +203,7 @@ export async function GET(req: NextRequest) {
     cafeResult.totalCount,
     convResult.totalCount,
     scaledAptCount,           // ← 스케일 적용
-    radius,
+    scoreRadius,              // 이소크론 없을 때 차량 1000m 폴백
     isochrone?.areaM2,
     scaledParkingCount,
     isoMode,

@@ -517,8 +517,8 @@ export function calcFootTrafficEstimate(
   const populationScore = Math.min(residentPopScore + workerPopScore, 20);
 
   const rawTotal = transitScore + commerceScore + residentialScore + populationScore;
-  // 이소크론(실도로망) 없을 때 → 원형 추정 신뢰도 75% 적용
-  const confidenceFactor = isochroneAreaM2 ? 1.0 : 0.75;
+  // 이소크론(실도로망) 없을 때 → 원형 추정 신뢰도 90% 적용 (신도시 과소평가 방지)
+  const confidenceFactor = isochroneAreaM2 ? 1.0 : 0.90;
   const adjustedTotal = Math.round(rawTotal * confidenceFactor);
   const score = Math.min(adjustedTotal, 100);
   // 포화도 지수: 100점 초과 원점수 (상권 과밀 지역 표시용)

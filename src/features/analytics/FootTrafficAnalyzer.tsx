@@ -883,7 +883,7 @@ export default function FootTrafficAnalyzer() {
                       <span className="text-xs font-normal text-slate-500"> km²</span>
                     </p>
                     <p className="text-[9px] text-slate-400 mt-0.5">
-                      {result.dataQuality?.sources.isochrone === "valhalla" ? "Valhalla 실도로망" : "⚠ 원형 추정 (점수 ×0.75)"}
+                      {result.dataQuality?.sources.isochrone === "valhalla" ? "Valhalla 실도로망" : "⚠ 원형 추정 (점수 ×0.90)"}
                     </p>
                   </div>
                   {/* 거주인구 */}
