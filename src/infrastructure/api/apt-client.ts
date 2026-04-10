@@ -52,8 +52,8 @@ export async function fetchAptsByBjdCode(bjdCode: string): Promise<AptSearchResu
       kaptName: String(item.kaptName ?? ""),
       kaptAddr: String(item.kaptAddr ?? ""),
       doroJuso: String(item.doroJuso ?? ""),
-      kaptdaCnt: parseInt(item.kaptdaCnt ?? "0") || 0,
-      kaptMrAgnt: parseInt(item.kaptMrAgnt ?? "0") || 0,
+      kaptdaCnt: parseInt(String(item.kaptdaCnt ?? "0")) || 0,
+      kaptMrAgnt: parseInt(String(item.kaptMrAgnt ?? "0")) || 0,
     }));
 
     const totalHouseholds = items.reduce((sum, apt) => sum + apt.kaptMrAgnt, 0);

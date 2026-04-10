@@ -36,10 +36,11 @@ interface PharmacyEstimate {
   hospitalCount: number;
   pharmacyCompetitorCount: number;
   detail: {
-    prescriptionScore: number;
-    accessScore: number;
-    residentialScore: number;
-    competitionScore: number;
+    residentScore: number;      // /25 거주 수요
+    prescriptionScore: number;  // /20 처방 인프라
+    workforceScore: number;     // /15 유동·직장인구
+    accessScore: number;        // /20 접근성
+    competitionScore: number;   // /20 경쟁 환경
   };
   insights: string[];
 }
@@ -818,13 +819,14 @@ export default function FootTrafficAnalyzer() {
                       />
                     </div>
 
-                    {/* 4개 지표 각각 프로그레스바 */}
+                    {/* 5개 지표 각각 프로그레스바 */}
                     <div className="mt-3 space-y-2.5">
                       {[
-                        { label: "처방 수요", value: result.pharmacyEstimate.detail.prescriptionScore, max: 40, sub: `병원 ${result.pharmacyEstimate.hospitalCount}개` },
-                        { label: "접근성",   value: result.pharmacyEstimate.detail.accessScore,       max: 30, sub: "이동범위 · 주차 · 버스" },
-                        { label: "주거 배후", value: result.pharmacyEstimate.detail.residentialScore,  max: 20, sub: "" },
-                        { label: "경쟁 강도", value: result.pharmacyEstimate.detail.competitionScore,  max: 10, sub: `경쟁약국 ${result.pharmacyEstimate.pharmacyCompetitorCount}개` },
+                        { label: "거주 수요",   value: result.pharmacyEstimate.detail.residentScore,      max: 25, sub: "인구·단지·연령" },
+                        { label: "처방 인프라", value: result.pharmacyEstimate.detail.prescriptionScore,  max: 20, sub: `병원 ${result.pharmacyEstimate.hospitalCount}개` },
+                        { label: "유동·직장",  value: result.pharmacyEstimate.detail.workforceScore,     max: 15, sub: "직장인구 · 버스" },
+                        { label: "접근성",     value: result.pharmacyEstimate.detail.accessScore,        max: 20, sub: "이동범위 · 주차 · 편의" },
+                        { label: "경쟁 환경",  value: result.pharmacyEstimate.detail.competitionScore,   max: 20, sub: `경쟁약국 ${result.pharmacyEstimate.pharmacyCompetitorCount}개` },
                       ].map(({ label, value, max, sub }) => (
                         <div key={label}>
                           <div className="flex items-center justify-between mb-0.5">

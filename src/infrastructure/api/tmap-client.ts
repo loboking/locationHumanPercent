@@ -55,7 +55,7 @@ export async function getTmapTrafficScore(
       speeds.push(p.speed);
       if (p.congestion) congestions.push(p.congestion);
       // 국도(011), 지방도(012/013), 시도(014) 주요 도로
-      if (["011","012","013","014"].includes(p.roadType) && p.name) {
+      if (p.roadType && ["011","012","013","014"].includes(p.roadType) && p.name) {
         const roadName = p.name.split("/")[0];
         majorRoads.add(roadName);
       }

@@ -214,7 +214,10 @@ export async function GET(req: NextRequest) {
     scaledAptCount,
     isochrone?.areaM2,
     isoMode,
-    agePopulation?.chronicPatientRatio ?? 0  // 만성질환층(50-60대) 비중 → 처방수요 보너스
+    agePopulation?.chronicPatientRatio ?? 0,  // 만성질환층(50-60대) 비중
+    agePopulation?.youngFamilyRatio   ?? 0,   // 30-40대 육아세대 비중
+    agePopulation?.total              ?? 0,   // 실거주 인구 수
+    workerStats?.workerCnt            ?? 0,   // 직장인구 수
   );
 
   // 데이터 신뢰도 평가 (Phase 1: 실데이터 비율 산출)
@@ -270,9 +273,8 @@ export async function GET(req: NextRequest) {
       busStops: [
         ...busResult.places.slice(0, 3).map((s) => ({ name: s.placeName, distance: s.distance, lat: s.lat, lng: s.lng })),
         ...stationsInRadius.map((s) => {
-          const coord = STATION_COORDS[s.id]!;
-          const distM = Math.round(haversineKm(lat, lng, coord.lat, coord.lng) * 1000);
-          return { name: s.name, distance: distM, lat: coord.lat, lng: coord.lng };
+          const distM = Math.round(haversineKm(lat, lng, s.lat, s.lng) * 1000);
+          return { name: s.name, distance: distM, lat: s.lat, lng: s.lng };
         }),
       ].sort((a, b) => a.distance - b.distance).slice(0, 5),
       restaurants: activeRestaurantCount,
