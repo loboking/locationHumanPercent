@@ -88,16 +88,13 @@ export async function GET(req: NextRequest) {
     moisAdmCd ? getWorkersByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     getTmapTrafficScore(lat, lng, 1),
   ]);
-  // 이소크론 실패 시 차량 모드는 1000m 폴백 (이소크론 평균 boundingRadius ~1200m와 유사)
-  // 신도시처럼 OSM 도로망이 미완성인 지역에서 500m 기본값으로 인한 과소 평가 방지
-  const carFallbackRadius = isoMode === "car" ? 1000 : 500;
-  const searchRadius = isochrone ? isochrone.boundingRadius : Math.max(radius, carFallbackRadius);
-  // 점수 계산용 반경: 이소크론 없으면 차량 모드 1000m, 도보 500m 사용
-  const scoreRadius = isochrone ? radius : Math.max(radius, carFallbackRadius);
+  // 검색 반경은 항상 고정 (이소크론 크기와 무관)
+  // 이소크론은 mobilityScore(이동 편의성 측정)에만 사용 → 구도심/신도시 공정 비교
+  const searchRadius = radius;
 
   // 병렬 조회: 버스정류장 + 상권(카카오) + 소상공인DB + 아파트 + 주차장 + 병원 + 경쟁약국
   const [busResult, restaurantData, cafeData, convData, aptResult, sohoResult, parkingData, hospitalResult, pharmacyCompResult] = await Promise.all([
-    searchBusStopsCount(lat, lng, isochrone ? Math.min(searchRadius, 2000) : searchRadius),
+    searchBusStopsCount(lat, lng, Math.min(searchRadius, 2000)),
     searchNearbyPlaces(lat, lng, "FD6", searchRadius), // 음식점
     searchNearbyPlaces(lat, lng, "CE7", searchRadius), // 카페
     searchNearbyPlaces(lat, lng, "CS2", searchRadius), // 편의점
@@ -119,21 +116,10 @@ export async function GET(req: NextRequest) {
   const convFiltered       = filterByIsochrone(convData.places);
   const aptFiltered        = filterByIsochrone(aptResult.complexes);
 
-  // 점수 계산용 카운트: boundingRadius 과대 산출 보정
-  // boundingRadius 원(넓음) 기준 totalCount → 폴리곤 면적 비율로 스케일 다운
-  // 이소크론 없을 때는 totalCount 그대로 사용
-  const circleAreaM2 = Math.PI * searchRadius * searchRadius;
-  const scaleFactor = isochrone
-    ? Math.min(1, isochrone.areaM2 / circleAreaM2)
-    : 1;
-  const scaleCount = (total: number, filtered: number) =>
-    isochrone
-      ? Math.max(filtered, Math.round(total * scaleFactor))
-      : total;
-
-  const restaurantResult = { totalCount: scaleCount(restaurantData.totalCount, restaurantFiltered.length), places: restaurantFiltered };
-  const cafeResult       = { totalCount: scaleCount(cafeData.totalCount, cafeFiltered.length),             places: cafeFiltered };
-  const convResult       = { totalCount: scaleCount(convData.totalCount, convFiltered.length),             places: convFiltered };
+  // 고정 반경으로 검색했으므로 별도 스케일 보정 불필요
+  const restaurantResult = { totalCount: restaurantData.totalCount, places: restaurantFiltered };
+  const cafeResult       = { totalCount: cafeData.totalCount,       places: cafeFiltered };
+  const convResult       = { totalCount: convData.totalCount,       places: convFiltered };
 
   // T맵 경로 매트릭스: 이소크론 내 아파트 단지 → 분석 위치 차량 소요 시간
   const aptForMatrix = isochrone ? aptFiltered : aptResult.complexes;
@@ -182,16 +168,12 @@ export async function GET(req: NextRequest) {
       ? Math.round(trafficHistory.reduce((s, d) => s + d.score, 0) / trafficHistory.length)
       : null;
 
-  // 음식점 수: 소상공인DB(영업중) 우선, 없으면 카카오 폴백 (소호도 동일 스케일 적용)
-  const scaledSohoCount    = Math.round(sohoResult.totalCount * scaleFactor);
-  const scaledParkingCount = Math.round(parkingData.totalCount * scaleFactor);
-  const scaledHospitalCount = Math.round(hospitalResult.totalCount * scaleFactor);
-  const scaledPharmacyCompCount = Math.round(pharmacyCompResult.totalCount * scaleFactor);
-  // 아파트: 이소크론 폴리곤 내 단지만 카운트 (음식점/카페와 동일 방식)
-  // 이소크론 없으면 scaleFactor 추정 사용
-  const scaledAptCount = isochrone
-    ? Math.max(aptFiltered.length, Math.round(aptResult.totalCount * scaleFactor))
-    : aptResult.complexes.length;
+  // 고정 반경 검색 결과를 그대로 사용 (스케일 보정 없음)
+  const scaledSohoCount    = sohoResult.totalCount;
+  const scaledParkingCount = parkingData.totalCount;
+  const scaledHospitalCount = hospitalResult.totalCount;
+  const scaledPharmacyCompCount = pharmacyCompResult.totalCount;
+  const scaledAptCount = aptResult.totalCount;  // 고정 반경 내 단지 수
 
   const activeRestaurantCount = scaledSohoCount > 0
     ? scaledSohoCount
@@ -202,8 +184,8 @@ export async function GET(req: NextRequest) {
     activeRestaurantCount,
     cafeResult.totalCount,
     convResult.totalCount,
-    scaledAptCount,           // ← 스케일 적용
-    scoreRadius,              // 이소크론 없을 때 차량 1000m 폴백
+    scaledAptCount,
+    radius,                   // 항상 고정 반경 (밀도 계산 기준)
     isochrone?.areaM2,
     scaledParkingCount,
     isoMode,
@@ -225,6 +207,7 @@ export async function GET(req: NextRequest) {
     agePopulation?.youngFamilyRatio   ?? 0,   // 30-40대 육아세대 비중
     agePopulation?.total              ?? 0,   // 실거주 인구 수
     workerStats?.workerCnt            ?? 0,   // 직장인구 수
+    radius,                                   // 밀도 계산용 고정 반경
   );
 
   // 데이터 신뢰도 평가 (Phase 1: 실데이터 비율 산출)

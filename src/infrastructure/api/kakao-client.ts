@@ -238,10 +238,10 @@ export function calcPharmacyScore(
   youngFamilyRatio = 0,      // 30-40대 비중(%)
   residentTotal = 0,         // 실거주 인구 수 (agePopulation.total)
   workerCount = 0,           // 직장인구 수 (workerStats.workerCnt)
+  fixedRadius = 500,         // 밀도 계산용 고정 반경 (m) — 이소크론 면적 대신 사용
 ): PharmacyScoreResult {
-  const areaKm2 = isochroneAreaM2
-    ? isochroneAreaM2 / 1_000_000
-    : Math.PI * (500 / 1000) ** 2;
+  // 밀도 계산에는 항상 고정 반경 사용 → 구도심/신도시 공정 비교
+  const areaKm2 = Math.PI * (fixedRadius / 1000) ** 2;
 
   // ── A. 거주 수요 (25점) ────────────────────────────────────────────────────
   // 신도시/구도심 편향 없이 실거주 인구 수와 단지 밀도를 함께 평가
@@ -435,10 +435,9 @@ export function calcFootTrafficEstimate(
   residentTotal = 0,    // 실거주 인구 수
   workerCount = 0,      // 직장인구 수
 ): FootTrafficEstimate {
-  // 면적(km²) 계산: 이소크론 있으면 실측, 없으면 반경 원
-  const areaKm2 = isochroneAreaM2
-    ? isochroneAreaM2 / 1_000_000
-    : Math.PI * (radius / 1000) ** 2;
+  // 밀도 계산에는 항상 고정 반경 사용 → 구도심/신도시 공정 비교
+  // (이소크론 면적은 mobilityScore에서만 사용)
+  const areaKm2 = Math.PI * (radius / 1000) ** 2;
 
   // ── 교통 접근성 (20점) ─────────────────────────────────────
   // 이동 접근성 (10점): 이소크론 면적 기반 — 실제 이동 가능 범위 측정
