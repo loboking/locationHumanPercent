@@ -293,12 +293,13 @@ export function calcPharmacyScore(
   const workforceScore = Math.min(workerScore + transitAccessScore, 15);
 
   // ── D. 접근성 (20점) ──────────────────────────────────────────────────────
-  // D1. 이동 가능 범위 (10점): 이소크론 면적 기준
+  // D1. 이동 가능 범위 (10점): 이소크론 실측 면적 기준 (밀도 계산과 별도)
+  const isoAreaKm2Pharm = isochroneAreaM2 ? isochroneAreaM2 / 1_000_000 : null;
   let mobilityScore: number;
-  if (isochroneAreaM2) {
+  if (isoAreaKm2Pharm != null) {
     mobilityScore = isoMode === "walk"
-      ? (areaKm2 >= 0.5 ? 8 : areaKm2 >= 0.3 ? 6 : 3)
-      : (areaKm2 >= 6 ? 10 : areaKm2 >= 3 ? 8 : areaKm2 >= 1.5 ? 6 : 4);
+      ? (isoAreaKm2Pharm >= 0.5 ? 8 : isoAreaKm2Pharm >= 0.3 ? 6 : 3)
+      : (isoAreaKm2Pharm >= 6 ? 10 : isoAreaKm2Pharm >= 3 ? 8 : isoAreaKm2Pharm >= 1.5 ? 6 : 4);
   } else {
     mobilityScore = 5; // 원형 폴백
   }
@@ -435,25 +436,21 @@ export function calcFootTrafficEstimate(
   residentTotal = 0,    // 실거주 인구 수
   workerCount = 0,      // 직장인구 수
 ): FootTrafficEstimate {
-  // 밀도 계산에는 항상 고정 반경 사용 → 구도심/신도시 공정 비교
-  // (이소크론 면적은 mobilityScore에서만 사용)
+  // 밀도 계산용: 항상 고정 반경 원형 면적 (구도심/신도시 공정 비교)
   const areaKm2 = Math.PI * (radius / 1000) ** 2;
+  // mobilityScore용: 실측 이소크론 면적 (이동 편의성 측정)
+  const isoAreaKm2 = isochroneAreaM2 ? isochroneAreaM2 / 1_000_000 : null;
 
   // ── 교통 접근성 (20점) ─────────────────────────────────────
-  // 이동 접근성 (10점): 이소크론 면적 기반 — 실제 이동 가능 범위 측정
-  // 차로 5분 ≈ 3-5km², 차로 10분 ≈ 6-10km², 도보 10분 ≈ 0.3-0.8km²
+  // 이동 접근성 (10점): 이소크론 실측 면적 기반 — 실제 이동 가능 범위 측정
   let mobilityScore: number;
-  if (isochroneAreaM2) {
+  if (isoAreaKm2 != null) {
     if (isoMode === "walk") {
-      // 도보: 0.3-0.5km² 예상 (0.5km² 이상이면 이동성 우수, 0.3km² 이상이면 양호)
-      mobilityScore = areaKm2 >= 0.5 ? 7 : areaKm2 >= 0.3 ? 5 : 3;
+      mobilityScore = isoAreaKm2 >= 0.5 ? 7 : isoAreaKm2 >= 0.3 ? 5 : 3;
     } else {
-      // 차로 5분 ≈ 2-5km², 차로 10분 ≈ 6-12km²
-      // 농촌 평야(대면적)와 도심 구분: 면적 대비 적정 스케일
-      mobilityScore = areaKm2 >= 6 ? 10 : areaKm2 >= 3 ? 8 : areaKm2 >= 1.5 ? 6 : 4;
+      mobilityScore = isoAreaKm2 >= 6 ? 10 : isoAreaKm2 >= 3 ? 8 : isoAreaKm2 >= 1.5 ? 6 : 4;
     }
   } else {
-    // 원형 폴백: 실도로망 없음 → 최소 점수
     mobilityScore = 4;
   }
   // 버스 접근성 (6점): 1개당 2점, 3개 이상=만점
