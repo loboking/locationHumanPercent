@@ -78,6 +78,7 @@ interface EstimateResult {
       parkingScore: number;
       commerceScore: number;
       residentialScore: number;
+      populationScore: number;
     };
     density: {
       areaKm2: number;
@@ -330,10 +331,11 @@ export default function FootTrafficAnalyzer() {
             box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:160px;font-family:sans-serif;">
             <p style="font-size:11px;color:#6b7280;margin:0 0 4px">분석 위치</p>
             <p style="font-size:12px;font-weight:700;color:#111;margin:0 0 6px">${data.address}</p>
-            <div style="display:flex;gap:8px;font-size:11px">
-              <span style="color:#3b82f6">교통 ${data.estimate.detail.transitScore}/25</span>
-              <span style="color:#7c3aed">상권 ${data.estimate.detail.commerceScore}/45</span>
-              <span style="color:#059669">주거 ${data.estimate.detail.residentialScore}/30</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px 10px;font-size:11px">
+              <span style="color:#3b82f6">교통 ${data.estimate.detail.transitScore}/20</span>
+              <span style="color:#7c3aed">상권 ${data.estimate.detail.commerceScore}/35</span>
+              <span style="color:#059669">주거 ${data.estimate.detail.residentialScore}/25</span>
+              <span style="color:#f59e0b">인구 ${data.estimate.detail.populationScore}/20</span>
             </div>
             <div style="margin-top:6px;font-size:13px;font-weight:800;color:#1d4ed8">
               종합 ${data.estimate.score}점 · ${data.estimate.grade}
@@ -763,40 +765,48 @@ export default function FootTrafficAnalyzer() {
                       <p className="text-[10px] text-amber-600 mt-1">기준치 100점 초과 · 상권 포화 가능성을 검토하세요</p>
                     )}
 
-                    {/* 3개 서브지표 숫자 그리드 */}
-                    <div className="mt-3 grid grid-cols-3 divide-x divide-slate-100">
-                      <div className="pr-3">
+                    {/* 4개 서브지표 숫자 그리드 */}
+                    <div className="mt-3 grid grid-cols-4 divide-x divide-slate-100">
+                      <div className="pr-2">
                         <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">교통</p>
                         <p className="text-xl font-bold text-slate-900 mt-0.5">
                           {result.estimate.detail.transitScore}
-                          <span className="text-xs font-normal text-slate-400"> / 25</span>
+                          <span className="text-xs font-normal text-slate-400"> / 20</span>
                         </p>
                         <div className="mt-1 space-y-0.5">
                           <div className="flex justify-between text-[10px] text-slate-400">
-                            <span>이동범위</span><span>{result.estimate.detail.mobilityScore}/12</span>
+                            <span>이동범위</span><span>{result.estimate.detail.mobilityScore}/10</span>
                           </div>
                           <div className="flex justify-between text-[10px] text-slate-400">
-                            <span>버스정류장</span><span>{result.estimate.detail.busScore}/8</span>
+                            <span>버스</span><span>{result.estimate.detail.busScore}/6</span>
                           </div>
                           <div className="flex justify-between text-[10px] text-slate-400">
-                            <span>주차장</span><span>{result.estimate.detail.parkingScore}/5</span>
+                            <span>주차</span><span>{result.estimate.detail.parkingScore}/4</span>
                           </div>
                         </div>
                       </div>
-                      <div className="px-3">
+                      <div className="px-2">
                         <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">상권</p>
                         <p className="text-xl font-bold text-slate-900 mt-0.5">
                           {result.estimate.detail.commerceScore}
-                          <span className="text-xs font-normal text-slate-400"> / 45</span>
+                          <span className="text-xs font-normal text-slate-400"> / 35</span>
                         </p>
                         <p className="mt-1 text-[10px] text-slate-400">밀도 기반</p>
                       </div>
-                      <div className="pl-3">
+                      <div className="px-2">
                         <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">주거</p>
                         <p className="text-xl font-bold text-slate-900 mt-0.5">
                           {result.estimate.detail.residentialScore}
-                          <span className="text-xs font-normal text-slate-400"> / 30</span>
+                          <span className="text-xs font-normal text-slate-400"> / 25</span>
                         </p>
+                      </div>
+                      <div className="pl-2">
+                        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">인구</p>
+                        <p className="text-xl font-bold text-slate-900 mt-0.5">
+                          {result.estimate.detail.populationScore}
+                          <span className="text-xs font-normal text-slate-400"> / 20</span>
+                        </p>
+                        <p className="mt-1 text-[10px] text-slate-400">거주·직장</p>
                       </div>
                     </div>
                   </>

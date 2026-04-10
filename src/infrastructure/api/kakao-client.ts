@@ -391,7 +391,7 @@ export function calcPharmacyScore(
 }
 
 // ── 유동인구 추정 점수 계산 ──────────────────────────────────────────────────
-// 교통(25점) + 상권(45점) + 주거(30점) = 100점
+// 교통(20점) + 상권(35점) + 주거(25점) + 인구(20점) = 100점
 export interface FootTrafficEstimate {
   score: number;          // 100점 만점 (기준치 cap 적용)
   overScore: number;      // 100 초과 원점수 (포화도 지수, 0이면 기준 이하)
@@ -409,6 +409,7 @@ export interface FootTrafficEstimate {
     parkingScore: number;
     commerceScore: number;
     residentialScore: number;
+    populationScore: number;   // /20 실거주+직장인구
   };
   density: {
     areaKm2: number;          // 분석 면적 (km²)
@@ -430,15 +431,17 @@ export function calcFootTrafficEstimate(
   radius = 500,
   isochroneAreaM2?: number,
   parkingCount = 0,
-  isoMode: "car" | "walk" = "car"
+  isoMode: "car" | "walk" = "car",
+  residentTotal = 0,    // 실거주 인구 수
+  workerCount = 0,      // 직장인구 수
 ): FootTrafficEstimate {
   // 면적(km²) 계산: 이소크론 있으면 실측, 없으면 반경 원
   const areaKm2 = isochroneAreaM2
     ? isochroneAreaM2 / 1_000_000
     : Math.PI * (radius / 1000) ** 2;
 
-  // ── 교통 접근성 (25점) ─────────────────────────────────────
-  // 이동 접근성 (12점): 이소크론 면적 기반 — 실제 이동 가능 범위 측정
+  // ── 교통 접근성 (20점) ─────────────────────────────────────
+  // 이동 접근성 (10점): 이소크론 면적 기반 — 실제 이동 가능 범위 측정
   // 차로 5분 ≈ 3-5km², 차로 10분 ≈ 6-10km², 도보 10분 ≈ 0.3-0.8km²
   let mobilityScore: number;
   if (isochroneAreaM2) {
@@ -454,14 +457,14 @@ export function calcFootTrafficEstimate(
     // 원형 폴백: 실도로망 없음 → 최소 점수
     mobilityScore = 4;
   }
-  // 버스 접근성 (8점): 1개당 2점, 4개 이상=만점
-  const busScore = Math.min(busStops * 2, 8);
-  // 주차 접근성 (5점): 주차장 1개당 1점, 5개=만점
-  const parkingScore = Math.min(parkingCount, 5);
+  // 버스 접근성 (6점): 1개당 2점, 3개 이상=만점
+  const busScore = Math.min(busStops * 2, 6);
+  // 주차 접근성 (4점): 주차장 1개당 1점, 4개=만점
+  const parkingScore = Math.min(parkingCount, 4);
   const transitScore = mobilityScore + busScore + parkingScore;
 
-  // ── 상권 활성도 (45점) — 밀도(개수/km²) 기반 ────────────────
-  // 만점 기준: 음식점 120/km², 카페 40/km², 편의점 14/km² (도심 상업지구 수준)
+  // ── 상권 활성도 (35점) — 밀도(개수/km²) 기반 ────────────────
+  // 만점 기준: 음식점 120/km², 카페 40/km², 편의점 16/km² (도심 상업지구 수준)
   // 최소 1km² 적용: 500m 원형(0.785km²) 과밀도 계산 방지
   const effectiveAreaKm2 = Math.max(areaKm2, 1.0);
   const rDensity = restaurants / effectiveAreaKm2;
@@ -471,33 +474,49 @@ export function calcFootTrafficEstimate(
   const cRatio = cDensity / 40;
   const sRatio = sDensity / 16;
   // 원점수 (cap 없음) — 오버 지수 계산용
-  const rawRScore = rRatio * 20;
-  const rawCScore = cRatio * 15;
-  const rawSScore = sRatio * 10;
+  const rawRScore = rRatio * 15;
+  const rawCScore = cRatio * 11;
+  const rawSScore = sRatio * 9;
   // cap 적용 점수 — 메인 점수용
-  const rScore = Math.min(rawRScore, 20);
-  const cScore = Math.min(rawCScore, 15);
-  const sScore = Math.min(rawSScore, 10);
+  const rScore = Math.min(rawRScore, 15);
+  const cScore = Math.min(rawCScore, 11);
+  const sScore = Math.min(rawSScore, 9);
   const commerceScore = Math.round(rScore + cScore + sScore);
 
-  // ── 주거 밀도 (30점) — 단지/km² 밀도 기반 (상권과 동일 방식) ──────────
-  // 이제 aptComplexCount = 이소크론 폴리곤 내 실제 단지 수 (추정값 아님)
-  // ── 주거 밀도 (30점) — 단지/km² 밀도 기반, 모드별 기준 차등 ──────────
+  // ── 주거 밀도 (25점) — 단지/km² 밀도 기반, 모드별 기준 차등 ──────────
   // 도보: 만점 기준 60단지/km² (좁은 범위, 최고밀도 주거지 기준)
   //   예) 도보10분(0.4km²)에서 24단지 = 60/km² = 만점
-  //   → 고덕 신도시(21단지/0.4km²=52.5/km²): 52.5/60*30=26점 (적정)
-  //   → 비전동(19단지/0.4km²=47.5/km²): 47.5/60*30=23점
+  //   → 고덕 신도시(21단지/0.4km²=52.5/km²): 52.5/60*25=21점 (적정)
+  //   → 비전동(19단지/0.4km²=47.5/km²): 47.5/60*25=19점
   // 차로: 만점 기준 50단지/km² (넓은 범위, 배후 인구 분산)
   //   예) 차로5분(2km²)에서 100단지 = 50/km² = 만점
-  //   → 고덕 차로5분(97단지/2.13km²=45.5/km²): 45.5/50*30=27점 (적정)
+  //   → 고덕 차로5분(97단지/2.13km²=45.5/km²): 45.5/50*25=22점 (적정)
   // 최소 0.1km²: 0으로 나누기 방지용 (과도한 하한 제거)
   const aptEffectiveAreaKm2 = Math.max(areaKm2, 0.1);
   const aptDensity = aptComplexCount / aptEffectiveAreaKm2;
   const aptDensityRef = isoMode === "walk" ? 60 : 50;
-  const residentialScore = Math.min(Math.round((aptDensity / aptDensityRef) * 30), 30);
+  const residentialScore = Math.min(Math.round((aptDensity / aptDensityRef) * 25), 25);
   const totalHouseholds = aptComplexCount * 700;
 
-  const rawTotal = transitScore + commerceScore + residentialScore;
+  // ── 유동 인구 (20점) ─────────────────────────────────────────
+  // D1. 실거주인구 (12점)
+  const residentPopScore =
+    residentTotal >= 30000 ? 12 :
+    residentTotal >= 20000 ?  9 :
+    residentTotal >= 10000 ?  6 :
+    residentTotal >=  5000 ?  3 :
+    residentTotal >       0 ?  1 : 0;
+
+  // D2. 직장인구 (8점)
+  const workerPopScore =
+    workerCount >= 10000 ? 8 :
+    workerCount >=  5000 ? 6 :
+    workerCount >=  2000 ? 3 :
+    workerCount >=   500 ? 1 : 0;
+
+  const populationScore = Math.min(residentPopScore + workerPopScore, 20);
+
+  const rawTotal = transitScore + commerceScore + residentialScore + populationScore;
   // 이소크론(실도로망) 없을 때 → 원형 추정 신뢰도 75% 적용
   const confidenceFactor = isochroneAreaM2 ? 1.0 : 0.75;
   const adjustedTotal = Math.round(rawTotal * confidenceFactor);
@@ -520,7 +539,7 @@ export function calcFootTrafficEstimate(
     convStoreCount: convStores,
     parkingCount,
     totalHouseholds,
-    detail: { transitScore, mobilityScore, busScore, parkingScore, commerceScore, residentialScore },
+    detail: { transitScore, mobilityScore, busScore, parkingScore, commerceScore, residentialScore, populationScore },
     density: {
       areaKm2: Math.round(areaKm2 * 100) / 100,
       restaurantPer1km2: Math.round(rDensity),

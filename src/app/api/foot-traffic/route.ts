@@ -201,7 +201,9 @@ export async function GET(req: NextRequest) {
     radius,
     isochrone?.areaM2,
     scaledParkingCount,
-    isoMode
+    isoMode,
+    agePopulation?.total      ?? 0,   // 실거주 인구 수
+    workerStats?.workerCnt    ?? 0,   // 직장인구 수
   );
 
   // 약국 전용 점수
