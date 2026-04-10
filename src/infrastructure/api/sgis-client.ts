@@ -9,6 +9,9 @@ const SGIS_KEY = process.env.SGIS_CONSUMER_KEY!;
 const SGIS_SECRET = process.env.SGIS_CONSUMER_SECRET!;
 const SGIS_BASE = "https://sgisapi.mods.go.kr/OpenAPI3";
 
+// 토큰 캐시 (SGIS 토큰 유효시간 약 24h → 23h 캐시)
+let sgisTokenCache: { token: string; expiresAt: number } | null = null;
+
 // age_type 코드: 30=0-9세, 31=10-19세, 32=20-29세, 33=30-39세,
 // 34=40-49세, 35=50-59세, 36=60-69세, 37=70-79세, 38=80-89세, 39=90세+
 const SGIS_AGE_TYPES = [30, 31, 32, 33, 34, 35, 36, 37, 38, 39] as const;
@@ -82,6 +85,9 @@ async function fetchMoisPopulation(admCd: string, admNm: string): Promise<AgePop
 
 // ── 2순위: SGIS 통계청 인구총조사(2020) ─────────────────────────
 async function getSgisToken(): Promise<string | null> {
+  if (sgisTokenCache && Date.now() < sgisTokenCache.expiresAt) {
+    return sgisTokenCache.token;
+  }
   try {
     const res = await fetch(
       `${SGIS_BASE}/auth/authentication.json?consumer_key=${SGIS_KEY}&consumer_secret=${SGIS_SECRET}`,
@@ -89,7 +95,11 @@ async function getSgisToken(): Promise<string | null> {
     );
     if (!res.ok) return null;
     const data = await res.json();
-    return data.result?.accessToken ?? null;
+    const token = data.result?.accessToken ?? null;
+    if (token) {
+      sgisTokenCache = { token, expiresAt: Date.now() + 23 * 60 * 60 * 1000 }; // 23h
+    }
+    return token;
   } catch {
     return null;
   }

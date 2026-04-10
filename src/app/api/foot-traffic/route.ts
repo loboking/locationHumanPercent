@@ -15,15 +15,6 @@ import { PYEONGTAEK_STATIONS } from "@/infrastructure/api/bus-client";
 import { getTmapTrafficScore, getTmapRouteMatrix } from "@/infrastructure/api/tmap-client";
 import { prisma } from "@/lib/prisma";
 
-// 정류장별 실제 GPS 좌표 (Kakao 미인덱스 지역 폴백용)
-const STATION_COORDS: Record<number, { lat: number; lng: number }> = {
-  233000375: { lat: 37.0506, lng: 127.0437 }, // 고덕신도시입구 (고덕동 일대)
-  233000510: { lat: 37.0506, lng: 127.0441 }, // 고덕동1896번지 (약 30m 이격)
-  233001200: { lat: 36.9919, lng: 127.0858 }, // 평택역
-  233001500: { lat: 36.9923, lng: 127.1094 }, // 평택시청
-  233002100: { lat: 37.0109, lng: 127.1122 }, // 비전동주민센터
-};
-
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -148,11 +139,9 @@ export async function GET(req: NextRequest) {
   // 버스정류장 폴백: Kakao 미인덱스 지역은 PYEONGTAEK_STATIONS 거리 계산
   const kakaoHasBusData = busResult.totalCount > 0;
   let busStopCount = busResult.totalCount;
-  const stationsInRadius = PYEONGTAEK_STATIONS.filter((s) => {
-    const coord = STATION_COORDS[s.id];
-    if (!coord) return false;
-    return haversineKm(lat, lng, coord.lat, coord.lng) <= searchRadius / 1000;
-  });
+  const stationsInRadius = PYEONGTAEK_STATIONS.filter((s) =>
+    haversineKm(lat, lng, s.lat, s.lng) <= searchRadius / 1000
+  );
   if (busStopCount === 0 && stationsInRadius.length > 0) {
     busStopCount = stationsInRadius.length;
   }
@@ -161,9 +150,7 @@ export async function GET(req: NextRequest) {
   let nearestStation = PYEONGTAEK_STATIONS[0];
   let minDist = Infinity;
   for (const station of PYEONGTAEK_STATIONS) {
-    const coord = STATION_COORDS[station.id];
-    if (!coord) continue;
-    const dist = haversineKm(lat, lng, coord.lat, coord.lng);
+    const dist = haversineKm(lat, lng, station.lat, station.lng);
     if (dist < minDist) { minDist = dist; nearestStation = station; }
   }
 
@@ -224,9 +211,10 @@ export async function GET(req: NextRequest) {
     scaledHospitalCount,
     scaledPharmacyCompCount,
     convResult.totalCount,
-    scaledAptCount,           // ← 스케일 적용
+    scaledAptCount,
     isochrone?.areaM2,
-    isoMode
+    isoMode,
+    agePopulation?.chronicPatientRatio ?? 0  // 만성질환층(50-60대) 비중 → 처방수요 보너스
   );
 
   // 데이터 신뢰도 평가 (Phase 1: 실데이터 비율 산출)

@@ -82,11 +82,11 @@ export function calcTrafficIndex(arrivals: BusArrival[]): {
   return { score, routeCount, activeCount, avgCrowded, grade };
 }
 
-// 평택시 주요 정류장 목록
+// 평택시 주요 정류장 목록 (좌표 포함 — foot-traffic/route.ts 동기화 불필요)
 export const PYEONGTAEK_STATIONS = [
-  { id: 233000375, name: "고덕신도시입구", area: "고덕동" },
-  { id: 233000510, name: "고덕동1896번지", area: "고덕동" },
-  { id: 233001200, name: "평택역", area: "평택동" },
-  { id: 233001500, name: "평택시청", area: "평택동" },
-  { id: 233002100, name: "비전동주민센터", area: "비전동" },
+  { id: 233000375, name: "고덕신도시입구",  area: "고덕동",  lat: 37.0506, lng: 127.0437 },
+  { id: 233000510, name: "고덕동1896번지",  area: "고덕동",  lat: 37.0506, lng: 127.0441 },
+  { id: 233001200, name: "평택역",          area: "평택동",  lat: 36.9919, lng: 127.0858 },
+  { id: 233001500, name: "평택시청",        area: "평택동",  lat: 36.9923, lng: 127.1094 },
+  { id: 233002100, name: "비전동주민센터",  area: "비전동",  lat: 37.0109, lng: 127.1122 },
 ];

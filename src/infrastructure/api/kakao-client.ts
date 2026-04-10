@@ -232,7 +232,8 @@ export function calcPharmacyScore(
   aptComplexCount: number,
   isochroneAreaM2?: number,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _isoMode: "car" | "walk" = "car"
+  _isoMode: "car" | "walk" = "car",
+  chronicPatientRatio = 0  // 50-60대 만성질환층 비중(%) — 처방수요 보너스용
 ): PharmacyScoreResult {
   const areaKm2 = isochroneAreaM2
     ? isochroneAreaM2 / 1_000_000
@@ -241,10 +242,12 @@ export function calcPharmacyScore(
   // A. 처방 수요 기반 (40점)
   // 병원 수 기반 (25점): 1개=5점, 5개이상=25점
   const hospitalBaseScore = Math.min(hospitalCount * 5, 25);
-  // 병원 밀도 보너스 (15점): 전국 도심 평균 3개/km² 기준
+  // 병원 밀도 보너스 (10점): 전국 도심 평균 3개/km² 기준
   const hospitalDensity = areaKm2 > 0 ? hospitalCount / areaKm2 : 0;
-  const densityScore = Math.min(Math.round((hospitalDensity / 3) * 15), 15);
-  const prescriptionScore = Math.min(hospitalBaseScore + densityScore, 40);
+  const densityScore = Math.min(Math.round((hospitalDensity / 3) * 10), 10);
+  // 만성질환층 보너스 (5점): 50-60대 비중 20%=1점, 40%이상=5점 (처방약 수요 직결)
+  const chronicBonus = Math.min(Math.round((chronicPatientRatio / 40) * 5), 5);
+  const prescriptionScore = Math.min(hospitalBaseScore + densityScore + chronicBonus, 40);
 
   // B. 접근성 (30점)
   // 이동범위 12점 (기존 mobilityScore 재활용)
@@ -301,6 +304,9 @@ export function calcPharmacyScore(
   }
   if (aptComplexCount >= 5) {
     insights.push(`아파트 단지 ${aptComplexCount}개 — 30-40대 육아세대 배후인구 풍부`);
+  }
+  if (chronicPatientRatio >= 35) {
+    insights.push(`만성질환층(50-60대) ${chronicPatientRatio}% — 처방약·건강보조식품 수요 높음`);
   }
 
   return {
@@ -413,8 +419,8 @@ export function calcFootTrafficEstimate(
   // 차로: 만점 기준 50단지/km² (넓은 범위, 배후 인구 분산)
   //   예) 차로5분(2km²)에서 100단지 = 50/km² = 만점
   //   → 고덕 차로5분(97단지/2.13km²=45.5/km²): 45.5/50*30=27점 (적정)
-  // 최소 0.4km² 적용: 도보 이소크론 과밀도 방지
-  const aptEffectiveAreaKm2 = Math.max(areaKm2, 0.4);
+  // 최소 0.1km²: 0으로 나누기 방지용 (과도한 하한 제거)
+  const aptEffectiveAreaKm2 = Math.max(areaKm2, 0.1);
   const aptDensity = aptComplexCount / aptEffectiveAreaKm2;
   const aptDensityRef = isoMode === "walk" ? 60 : 50;
   const residentialScore = Math.min(Math.round((aptDensity / aptDensityRef) * 30), 30);
@@ -423,8 +429,10 @@ export function calcFootTrafficEstimate(
   const rawTotal = transitScore + commerceScore + residentialScore;
   // 이소크론(실도로망) 없을 때 → 원형 추정 신뢰도 75% 적용
   const confidenceFactor = isochroneAreaM2 ? 1.0 : 0.75;
-  const score = Math.min(Math.round(rawTotal * confidenceFactor), 100);
-  const overScore = 0;
+  const adjustedTotal = Math.round(rawTotal * confidenceFactor);
+  const score = Math.min(adjustedTotal, 100);
+  // 포화도 지수: 100점 초과 원점수 (상권 과밀 지역 표시용)
+  const overScore = Math.max(0, adjustedTotal - 100);
 
   const grade =
     score >= 70 ? "매우높음" :
