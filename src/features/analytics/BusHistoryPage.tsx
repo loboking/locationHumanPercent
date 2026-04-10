@@ -36,6 +36,7 @@ export default function BusHistoryPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch(`/api/bus-history?period=${period}`)
       .then((r) => r.json())

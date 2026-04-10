@@ -9,7 +9,7 @@ import {
   calcPharmacyScore,
 } from "@/infrastructure/api/kakao-client";
 import { searchSohoRestaurantCount, searchSohoCount } from "@/infrastructure/api/soho-client";
-import { getAgePopulationByRegion } from "@/infrastructure/api/sgis-client";
+import { getAgePopulationByRegion, getWorkersByRegion } from "@/infrastructure/api/sgis-client";
 import { getIsochrone, isPointInPolygon } from "@/infrastructure/api/isochrone-client";
 import { PYEONGTAEK_STATIONS } from "@/infrastructure/api/bus-client";
 import { getTmapTrafficScore, getTmapRouteMatrix } from "@/infrastructure/api/tmap-client";
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
       { headers: { Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}` } }
     );
     const rgCodeData = await rgCodeRes.json();
-    const hDoc = (rgCodeData.documents ?? []).find((d: any) => d.region_type === "H");
+    const hDoc = (rgCodeData.documents ?? []).find((d: Record<string, string>) => d.region_type === "H");
     if (hDoc) {
       moisAdmCd = hDoc.code ?? "";
       moisAdmNm = [hDoc.region_1depth_name, hDoc.region_2depth_name, hDoc.region_3depth_name]
@@ -91,9 +91,10 @@ export async function GET(req: NextRequest) {
   } catch { /* 무시 */ }
 
   // 이소크론 + 행안부 연령별 인구 + T맵 교통정보 병렬 조회
-  const [isochrone, agePopulation, tmapTraffic] = await Promise.all([
+  const [isochrone, agePopulation, workerStats, tmapTraffic] = await Promise.all([
     getIsochrone(lat, lng, isoMode, isoMinutes),
     moisAdmCd ? getAgePopulationByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
+    moisAdmCd ? getWorkersByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     getTmapTrafficScore(lat, lng, 1),
   ]);
   const searchRadius = isochrone ? isochrone.boundingRadius : radius;
@@ -120,6 +121,7 @@ export async function GET(req: NextRequest) {
   const restaurantFiltered = filterByIsochrone(restaurantData.places);
   const cafeFiltered       = filterByIsochrone(cafeData.places);
   const convFiltered       = filterByIsochrone(convData.places);
+  const aptFiltered        = filterByIsochrone(aptResult.complexes);
 
   // 점수 계산용 카운트: boundingRadius 과대 산출 보정
   // boundingRadius 원(넓음) 기준 totalCount → 폴리곤 면적 비율로 스케일 다운
@@ -137,9 +139,10 @@ export async function GET(req: NextRequest) {
   const cafeResult       = { totalCount: scaleCount(cafeData.totalCount, cafeFiltered.length),             places: cafeFiltered };
   const convResult       = { totalCount: scaleCount(convData.totalCount, convFiltered.length),             places: convFiltered };
 
-  // T맵 경로 매트릭스: 아파트 단지 → 분석 위치 차량 소요 시간
-  const tmapMatrix = aptResult.complexes.length > 0
-    ? await getTmapRouteMatrix(aptResult.complexes, lat, lng)
+  // T맵 경로 매트릭스: 이소크론 내 아파트 단지 → 분석 위치 차량 소요 시간
+  const aptForMatrix = isochrone ? aptFiltered : aptResult.complexes;
+  const tmapMatrix = aptForMatrix.length > 0
+    ? await getTmapRouteMatrix(aptForMatrix, lat, lng)
     : null;
 
   // 버스정류장 폴백: Kakao 미인덱스 지역은 PYEONGTAEK_STATIONS 거리 계산
@@ -192,11 +195,11 @@ export async function GET(req: NextRequest) {
   const scaledParkingCount = Math.round(parkingData.totalCount * scaleFactor);
   const scaledHospitalCount = Math.round(hospitalResult.totalCount * scaleFactor);
   const scaledPharmacyCompCount = Math.round(pharmacyCompResult.totalCount * scaleFactor);
-  // 아파트 단지수도 동일 스케일 보정 (기존: totalCount 미보정으로 residentialScore 과대 산출)
-  const scaledAptCount = Math.max(
-    aptResult.complexes.length,
-    Math.round(aptResult.totalCount * scaleFactor)
-  );
+  // 아파트: 이소크론 폴리곤 내 단지만 카운트 (음식점/카페와 동일 방식)
+  // 이소크론 없으면 scaleFactor 추정 사용
+  const scaledAptCount = isochrone
+    ? Math.max(aptFiltered.length, Math.round(aptResult.totalCount * scaleFactor))
+    : aptResult.complexes.length;
 
   const activeRestaurantCount = scaledSohoCount > 0
     ? scaledSohoCount
@@ -246,6 +249,11 @@ export async function GET(req: NextRequest) {
       : null,
     estimate,
     pharmacyEstimate,
+    workerStats: workerStats ? {
+      adm_nm: workerStats.adm_nm,
+      companyCnt: workerStats.companyCnt,
+      workerCnt: workerStats.workerCnt,
+    } : null,
     agePopulation: agePopulation ? {
       adm_nm: agePopulation.adm_nm,
       total: agePopulation.total,
@@ -285,9 +293,9 @@ export async function GET(req: NextRequest) {
       convStores: convResult.totalCount,
     },
     apartments: {
-      totalCount: aptResult.totalCount,
+      totalCount: scaledAptCount,
       totalHouseholds: estimate.totalHouseholds,
-      complexes: aptResult.complexes.slice(0, 5),
+      complexes: (isochrone ? aptFiltered : aptResult.complexes).slice(0, 5),
     },
     trafficHistory: {
       stationName: nearestStation.name,

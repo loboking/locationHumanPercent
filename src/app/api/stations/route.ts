@@ -29,8 +29,9 @@ export async function GET() {
     })
   );
 
+  type StationWithCoords = (typeof PYEONGTAEK_STATIONS)[0] & { lat: number | null; lng: number | null };
   const stations = results
-    .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled")
+    .filter((r): r is PromiseFulfilledResult<StationWithCoords> => r.status === "fulfilled")
     .map((r) => r.value);
 
   return NextResponse.json({ stations });

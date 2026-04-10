@@ -5,6 +5,7 @@ import Script from "next/script";
 
 declare global {
   interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     kakao: any;
   }
 }
@@ -30,6 +31,7 @@ export default function KakaoMap({
   className = "w-full h-[400px]",
 }: KakaoMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef = useRef<any>(null);
 
   const initMap = () => {
@@ -72,6 +74,7 @@ export default function KakaoMap({
     if (window.kakao?.maps) {
       initMap();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, markers]);
 
   return (

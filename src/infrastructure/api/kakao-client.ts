@@ -61,7 +61,7 @@ export async function searchNearbyPlaces(
     });
     const data = await res.json();
     if (page === 1) totalCount = data.meta?.total_count ?? 0;
-    const places = (data.documents ?? []).map((d: any) => ({
+    const places = (data.documents ?? []).map((d: Record<string, string>) => ({
       id: d.id,
       placeName: d.place_name,
       categoryName: d.category_name,
@@ -91,11 +91,13 @@ export async function searchNearbyCount(
   });
   const res = await fetch(`${BASE}/v2/local/search/category.json?${params}`, {
     headers: { Authorization: `KakaoAK ${REST_KEY}` },
+    signal: AbortSignal.timeout(5000),
   });
+  if (!res.ok) return { totalCount: 0, places: [] };
   const data = await res.json();
   return {
     totalCount: data.meta?.total_count ?? 0,
-    places: (data.documents ?? []).map((d: any) => ({
+    places: (data.documents ?? []).map((d: Record<string, string>) => ({
       id: d.id,
       placeName: d.place_name,
       categoryName: d.category_name,
@@ -131,7 +133,7 @@ export async function searchBusStopsCount(
 
   const [d1, d2] = await Promise.all([res1.json(), res2.json()]);
 
-  const toPlace = (d: any): KakaoPlace => ({
+  const toPlace = (d: Record<string, string>): KakaoPlace => ({
     id: d.id,
     placeName: d.place_name,
     categoryName: d.category_name,
@@ -148,7 +150,8 @@ export async function searchBusStopsCount(
   const merged = [...places1, ...places2.filter((p) => !seen.has(p.id))];
   merged.sort((a, b) => a.distance - b.distance);
 
-  const totalCount = (d1.meta?.total_count ?? 0) + (d2.meta?.total_count ?? 0);
+  // totalCount: 두 쿼리 중 더 큰 값 사용 (단순 합산 시 이중카운트 방지)
+  const totalCount = Math.max(d1.meta?.total_count ?? 0, d2.meta?.total_count ?? 0, merged.length);
 
   return { totalCount, places: merged };
 }
@@ -161,7 +164,7 @@ export async function getRegionCode(lat: number, lng: number): Promise<string | 
   });
   if (!res.ok) return null;
   const data = await res.json();
-  const bCode = (data.documents ?? []).find((d: any) => d.region_type === "B");
+  const bCode = (data.documents ?? []).find((d: Record<string, string>) => d.region_type === "B");
   return bCode?.code ?? null;
 }
 
@@ -172,30 +175,35 @@ export async function searchApartmentCount(
   lng: number,
   radius = 500
 ): Promise<{ totalCount: number; complexes: { name: string; distance: number; lat: number; lng: number }[] }> {
-  const params = new URLSearchParams({
-    query: "아파트",
-    x: String(lng),
-    y: String(lat),
-    radius: String(radius),
-    size: "15",
-  });
-  const res = await fetch(`${BASE}/v2/local/search/keyword.json?${params}`, {
-    headers: { Authorization: `KakaoAK ${REST_KEY}` },
-  });
-  if (!res.ok) return { totalCount: 0, complexes: [] };
-  const data = await res.json();
-  const complexes = (data.documents ?? [])
-    .filter((d: any) => d.category_name?.includes("아파트"))
-    .map((d: any) => ({
-      name: d.place_name as string,
-      distance: parseInt(d.distance),
-      lat: parseFloat(d.y),
-      lng: parseFloat(d.x),
-    }));
-  return {
-    totalCount: data.meta?.total_count ?? 0,
-    complexes,
-  };
+  let totalCount = 0;
+  const all: { name: string; distance: number; lat: number; lng: number }[] = [];
+  for (let page = 1; page <= 3; page++) {
+    const params = new URLSearchParams({
+      query: "아파트",
+      x: String(lng),
+      y: String(lat),
+      radius: String(radius),
+      size: "15",
+      page: String(page),
+    });
+    const res = await fetch(`${BASE}/v2/local/search/keyword.json?${params}`, {
+      headers: { Authorization: `KakaoAK ${REST_KEY}` },
+    });
+    if (!res.ok) break;
+    const data = await res.json();
+    if (page === 1) totalCount = data.meta?.total_count ?? 0;
+    const docs = (data.documents ?? [])
+      .filter((d: Record<string, string>) => d.category_name?.includes("아파트"))
+      .map((d: Record<string, string>) => ({
+        name: d.place_name as string,
+        distance: parseInt(d.distance),
+        lat: parseFloat(d.y),
+        lng: parseFloat(d.x),
+      }));
+    all.push(...docs);
+    if (data.meta?.is_end) break;
+  }
+  return { totalCount, complexes: all };
 }
 
 // ── 약국 전용 점수 계산 ──────────────────────────────────────────────────────
@@ -223,7 +231,8 @@ export function calcPharmacyScore(
   convStoreCount: number,
   aptComplexCount: number,
   isochroneAreaM2?: number,
-  isoMode: "car" | "walk" = "car"
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _isoMode: "car" | "walk" = "car"
 ): PharmacyScoreResult {
   const areaKm2 = isochroneAreaM2
     ? isochroneAreaM2 / 1_000_000
@@ -357,8 +366,8 @@ export function calcFootTrafficEstimate(
   let mobilityScore: number;
   if (isochroneAreaM2) {
     if (isoMode === "walk") {
-      // 도보: 0.3-0.8km² 예상
-      mobilityScore = areaKm2 >= 0.6 ? 7 : areaKm2 >= 0.3 ? 5 : 3;
+      // 도보: 0.3-0.5km² 예상 (0.5km² 이상이면 이동성 우수, 0.3km² 이상이면 양호)
+      mobilityScore = areaKm2 >= 0.5 ? 7 : areaKm2 >= 0.3 ? 5 : 3;
     } else {
       // 차로 5분 ≈ 2-5km², 차로 10분 ≈ 6-12km²
       // 농촌 평야(대면적)와 도심 구분: 면적 대비 적정 스케일
@@ -375,35 +384,40 @@ export function calcFootTrafficEstimate(
   const transitScore = mobilityScore + busScore + parkingScore;
 
   // ── 상권 활성도 (45점) — 밀도(개수/km²) 기반 ────────────────
-  // 전국 도심 평균 밀도 기준: 음식점 50/km², 카페 20/km², 편의점 7/km²
+  // 만점 기준: 음식점 120/km², 카페 40/km², 편의점 14/km² (도심 상업지구 수준)
   // 최소 1km² 적용: 500m 원형(0.785km²) 과밀도 계산 방지
   const effectiveAreaKm2 = Math.max(areaKm2, 1.0);
   const rDensity = restaurants / effectiveAreaKm2;
   const cDensity = cafes / effectiveAreaKm2;
   const sDensity = convStores / effectiveAreaKm2;
-  const rRatio = rDensity / 50;
-  const cRatio = cDensity / 20;
-  const sRatio = sDensity / 7;
+  const rRatio = rDensity / 120;
+  const cRatio = cDensity / 40;
+  const sRatio = sDensity / 16;
   // 원점수 (cap 없음) — 오버 지수 계산용
   const rawRScore = rRatio * 20;
   const rawCScore = cRatio * 15;
   const rawSScore = sRatio * 10;
-  const rawCommerceScore = rawRScore + rawCScore + rawSScore;
   // cap 적용 점수 — 메인 점수용
   const rScore = Math.min(rawRScore, 20);
   const cScore = Math.min(rawCScore, 15);
   const sScore = Math.min(rawSScore, 10);
   const commerceScore = Math.round(rScore + cScore + sScore);
 
-  // ── 주거 밀도 (30점) — 반경 면적 비례 ───────────────────────
-  const circleAreaM2 = Math.PI * 500 * 500;
-  const rawAreaFactor = isochroneAreaM2 ? isochroneAreaM2 / circleAreaM2 : (radius / 500) ** 2;
-  // 도보 모드(이소크론 0.3~0.7km²): rawAreaFactor < 1 → aptMax = 9 이하로 너무 낮아짐
-  // → 도보는 검색 반경이 ~500m로 car와 거의 같으므로 고정 2.0 사용 (aptMax=40)
-  // → 차로 모드: 넓은 이소크론 비례 (최대 4배 → aptMax=80)
-  const aptAreaFactor = isoMode === "walk" ? 2.0 : Math.min(rawAreaFactor, 4);
-  const aptMax = Math.max(1, Math.round(20 * aptAreaFactor));
-  const residentialScore = Math.min(Math.round((aptComplexCount / aptMax) * 30), 30);
+  // ── 주거 밀도 (30점) — 단지/km² 밀도 기반 (상권과 동일 방식) ──────────
+  // 이제 aptComplexCount = 이소크론 폴리곤 내 실제 단지 수 (추정값 아님)
+  // ── 주거 밀도 (30점) — 단지/km² 밀도 기반, 모드별 기준 차등 ──────────
+  // 도보: 만점 기준 60단지/km² (좁은 범위, 최고밀도 주거지 기준)
+  //   예) 도보10분(0.4km²)에서 24단지 = 60/km² = 만점
+  //   → 고덕 신도시(21단지/0.4km²=52.5/km²): 52.5/60*30=26점 (적정)
+  //   → 비전동(19단지/0.4km²=47.5/km²): 47.5/60*30=23점
+  // 차로: 만점 기준 50단지/km² (넓은 범위, 배후 인구 분산)
+  //   예) 차로5분(2km²)에서 100단지 = 50/km² = 만점
+  //   → 고덕 차로5분(97단지/2.13km²=45.5/km²): 45.5/50*30=27점 (적정)
+  // 최소 0.4km² 적용: 도보 이소크론 과밀도 방지
+  const aptEffectiveAreaKm2 = Math.max(areaKm2, 0.4);
+  const aptDensity = aptComplexCount / aptEffectiveAreaKm2;
+  const aptDensityRef = isoMode === "walk" ? 60 : 50;
+  const residentialScore = Math.min(Math.round((aptDensity / aptDensityRef) * 30), 30);
   const totalHouseholds = aptComplexCount * 700;
 
   const rawTotal = transitScore + commerceScore + residentialScore;
@@ -414,8 +428,8 @@ export function calcFootTrafficEstimate(
 
   const grade =
     score >= 70 ? "매우높음" :
-    score >= 50 ? "높음" :
-    score >= 30 ? "보통" : "낮음";
+    score >= 45 ? "높음" :
+    score >= 25 ? "보통" : "낮음";
 
   return {
     score,
@@ -433,9 +447,9 @@ export function calcFootTrafficEstimate(
       restaurantPer1km2: Math.round(rDensity),
       cafePer1km2: Math.round(cDensity),
       convPer1km2: Math.round(sDensity * 10) / 10,
-      restaurantRatio: Math.round(rRatio * 10) / 10,
-      cafeRatio: Math.round(cRatio * 10) / 10,
-      convRatio: Math.round(sRatio * 10) / 10,
+      restaurantRatio: Math.round(rRatio * 10) / 10,  // 1.0 = 120/km² 기준
+      cafeRatio: Math.round(cRatio * 10) / 10,         // 1.0 = 60/km²
+      convRatio: Math.round(sRatio * 10) / 10,         // 1.0 = 20/km²
     },
   };
 }

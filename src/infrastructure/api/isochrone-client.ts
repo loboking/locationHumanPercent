@@ -24,9 +24,8 @@ export async function getIsochrone(
   // 도심 보정: Valhalla 자유주행/자유보행 속도 → 실제 도심 속도 보정
   // 차로: 제한속도 대비 실제 주행 ≈ 73%
   //   예) 차로 5분 → 3.65분 요청
-  // 도보: 신호대기(30~90초/교차로) + 횡단보도 대기 포함 실효율 ≈ 65%
-  //   예) 도보 10분 → 6.5분 요청 ≈ 실제 체감 10분 보행 거리
-  const urbanFactor = mode === "car" ? 0.73 : 0.65;
+  // 도보: walking_speed 3.5km/h 단독 보정 (urbanFactor + speed 이중보정 방지)
+  const urbanFactor = mode === "car" ? 0.73 : 1.0;
   const adjustedMinutes = Math.max(1, Math.round(minutes * urbanFactor * 10) / 10);
 
   const costingOptions = mode === "car"
@@ -83,14 +82,36 @@ function calcBoundingRadius(areaM2: number): number {
   return Math.min(Math.ceil(equivalentRadius * 1.5), 3000);
 }
 
-// 점이 폴리곤 안에 있는지 (Ray Casting)
+// 점 → 선분 최단거리 (미터)
+function distanceToSegmentM(
+  px: number, py: number,  // 점 [lng, lat]
+  ax: number, ay: number,  // 선분 시작 [lng, lat]
+  bx: number, by: number   // 선분 끝 [lng, lat]
+): number {
+  const mPerLat = 111320;
+  const mPerLng = 111320 * Math.cos((py * Math.PI) / 180);
+  const dx = (bx - ax) * mPerLng;
+  const dy = (by - ay) * mPerLat;
+  const len2 = dx * dx + dy * dy;
+  const ex = (px - ax) * mPerLng;
+  const ey = (py - ay) * mPerLat;
+  if (len2 === 0) return Math.sqrt(ex * ex + ey * ey);
+  const t = Math.max(0, Math.min(1, (ex * dx + ey * dy) / len2));
+  return Math.sqrt((ex - t * dx) ** 2 + (ey - t * dy) ** 2);
+}
+
+// 점이 폴리곤 안에 있는지 (Ray Casting + 경계 버퍼)
+// bufferM: 폴리곤 경계로부터 이 거리(미터) 이내면 포함으로 처리
+// → 도로가 경계선이 될 때 길 건너 장소가 잘리는 문제 완화
 export function isPointInPolygon(
   lng: number,
   lat: number,
-  polygon: [number, number][]
+  polygon: [number, number][],
+  bufferM = 60
 ): boolean {
-  let inside = false;
   const n = polygon.length;
+  // 1. Ray Casting — 폴리곤 내부 판정
+  let inside = false;
   for (let i = 0, j = n - 1; i < n; j = i++) {
     const [xi, yi] = polygon[i];
     const [xj, yj] = polygon[j];
@@ -99,5 +120,12 @@ export function isPointInPolygon(
       lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
     if (intersect) inside = !inside;
   }
-  return inside;
+  if (inside) return true;
+  // 2. 경계 버퍼 — 폴리곤 경계 60m 이내면 포함
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    if (distanceToSegmentM(lng, lat, xi, yi, xj, yj) <= bufferM) return true;
+  }
+  return false;
 }

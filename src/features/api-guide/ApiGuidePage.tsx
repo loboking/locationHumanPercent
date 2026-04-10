@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useApiSetup } from "@/application/hooks/useApiSetup";
 import { CATEGORY_LABELS, CATEGORY_COLORS } from "@/domain/entities/api-registry";
 import { CheckCircle2, Circle, ExternalLink, ChevronRight } from "lucide-react";
@@ -172,9 +173,9 @@ export default function ApiGuidePage() {
           <div className="text-3xl mb-2">🎉</div>
           <h3 className="text-lg font-bold text-emerald-800">모든 API 신청 완료!</h3>
           <p className="text-sm text-emerald-600 mt-1">이제 대시보드에서 실제 데이터를 연동할 수 있습니다.</p>
-          <a href="/" className="inline-flex items-center gap-1.5 mt-4 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
+          <Link href="/" className="inline-flex items-center gap-1.5 mt-4 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
             대시보드로 이동 <ChevronRight size={16} />
-          </a>
+          </Link>
         </div>
       )}
 

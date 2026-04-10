@@ -63,8 +63,8 @@ async function fetchSohoInRadius(
     const body = data.body;
     if (!body || body.totalCount === 0) return { totalCount: 0, stores: [] };
 
-    const items: any[] = Array.isArray(body.items) ? body.items : (body.items ? [body.items] : []);
-    const stores: SohoStore[] = items.map((d: any) => ({
+    const items: Record<string, string>[] = Array.isArray(body.items) ? body.items : (body.items ? [body.items] : []);
+    const stores: SohoStore[] = items.map((d: Record<string, string>) => ({
       bizesNm:    d.bizesNm ?? "",
       indsLclsNm: d.indsLclsNm ?? "",
       indsSclsNm: d.indsSclsNm ?? "",

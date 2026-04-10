@@ -40,7 +40,8 @@ export async function getTmapTrafficScore(
     if (!res.ok) return null;
     const data = await res.json();
 
-    const features: any[] = data.features ?? [];
+    type TMapFeature = { properties?: { congestion?: number; speed?: number; roadType?: string; name?: string } };
+    const features: TMapFeature[] = data.features ?? [];
     if (features.length === 0) return null;
 
     // 도로 세그먼트에서 속도/혼잡도 집계
@@ -170,7 +171,8 @@ export async function getTmapRouteMatrix(
     }
 
     const data = await res.json();
-    const rows: any[] = data.rows ?? [];
+    type TMapRow = { elements?: { duration?: { value: number } }[] };
+    const rows: TMapRow[] = data.rows ?? [];
     const times: number[] = [];
 
     for (const row of rows) {

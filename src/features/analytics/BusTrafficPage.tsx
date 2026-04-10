@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bus, TrendingUp, Clock, Users } from "lucide-react";
+import { Bus, Clock } from "lucide-react";
 import clsx from "clsx";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 

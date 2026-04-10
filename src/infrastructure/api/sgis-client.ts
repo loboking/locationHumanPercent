@@ -110,7 +110,8 @@ async function findSgisCodes(token: string, sido: string, sigungu: string, dong:
     // 1단계: 시도 코드
     const sidoRes = await fetch(`${SGIS_BASE}/addr/stage.json?accessToken=${token}&pg_yn=0`);
     const sidoData = await sidoRes.json();
-    const sidoItem = (sidoData.result ?? []).find((r: any) =>
+    type StageItem = { addr_name: string; cd: string };
+    const sidoItem = (sidoData.result ?? []).find((r: StageItem) =>
       r.addr_name.replace(/특별시|광역시|특별자치시|특별자치도|도$/, "").includes(
         sido.replace(/특별시|광역시|특별자치시|특별자치도|도$/, "")
       )
@@ -120,15 +121,15 @@ async function findSgisCodes(token: string, sido: string, sigungu: string, dong:
     // 2단계: 시군구 코드
     const sgRes = await fetch(`${SGIS_BASE}/addr/stage.json?accessToken=${token}&cd=${sidoItem.cd}&pg_yn=0`);
     const sgData = await sgRes.json();
-    const sgItem = (sgData.result ?? []).find((r: any) => r.addr_name.includes(sigungu.replace(/시$|군$|구$/, "")));
+    const sgItem = (sgData.result ?? []).find((r: StageItem) => r.addr_name.includes(sigungu.replace(/시$|군$|구$/, "")));
     if (!sgItem) return [];
 
     // 3단계: 동 코드 (숫자 제거 후 부분 매칭 → 복수 동 지원)
     const dongRes = await fetch(`${SGIS_BASE}/addr/stage.json?accessToken=${token}&cd=${sgItem.cd}&pg_yn=0`);
     const dongData = await dongRes.json();
     const baseDong = dong.replace(/[0-9]/g, "").replace(/동$/, "");
-    const matched = (dongData.result ?? []).filter((r: any) => r.addr_name.includes(baseDong));
-    return matched.length > 0 ? matched.map((r: any) => r.cd) : [sgItem.cd];
+    const matched = (dongData.result ?? []).filter((r: StageItem) => r.addr_name.includes(baseDong));
+    return matched.length > 0 ? matched.map((r: StageItem) => r.cd) : [sgItem.cd];
   } catch {
     return [];
   }
@@ -188,6 +189,53 @@ function buildResult(admCd: string, admNm: string, buckets: number[], total: num
     youngFamilyRatio: Math.round((youngFamily / total) * 100),
     chronicPatientRatio: Math.round((chronicPatient / total) * 100),
   };
+}
+
+// ── 사업체/종사자 통계 (직장인구 근사치) ─────────────────────────
+export interface WorkerStats {
+  adm_nm: string;
+  companyCnt: number;   // 사업체 수
+  workerCnt: number;    // 종사자 수 (낮 시간 유동인구 근사치)
+}
+
+export async function getWorkersByRegion(
+  admCd: string,
+  admNm: string
+): Promise<WorkerStats | null> {
+  if (!SGIS_KEY || !SGIS_SECRET) return null;
+  const token = await getSgisToken();
+  if (!token) return null;
+
+  const { sido, sigungu, dong } = parseAdmNm(admNm);
+  const codes = await findSgisCodes(token, sido, sigungu, dong);
+  if (!codes.length) return null;
+
+  try {
+    const results = await Promise.all(
+      codes.map((code) =>
+        fetch(
+          `${SGIS_BASE}/stats/company.json?accessToken=${token}&year=2022&adm_cd=${code}`,
+          { signal: AbortSignal.timeout(6000) }
+        )
+          .then((r) => r.json())
+          .then((d) => ({
+            companyCnt: parseInt(d.result?.[0]?.company_cnt ?? "0", 10) || 0,
+            workerCnt: parseInt(d.result?.[0]?.total_worker_cnt ?? "0", 10) || 0,
+          }))
+          .catch(() => ({ companyCnt: 0, workerCnt: 0 }))
+      )
+    );
+
+    const total = results.reduce(
+      (acc, r) => ({ companyCnt: acc.companyCnt + r.companyCnt, workerCnt: acc.workerCnt + r.workerCnt }),
+      { companyCnt: 0, workerCnt: 0 }
+    );
+
+    if (total.workerCnt === 0) return null;
+    return { adm_nm: admNm, ...total };
+  } catch {
+    return null;
+  }
 }
 
 // ── 메인 공개 함수 ────────────────────────────────────────────────

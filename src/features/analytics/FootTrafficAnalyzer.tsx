@@ -11,6 +11,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
 } from "recharts";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare global { interface Window { kakao: any } }
 
 interface Station {
@@ -101,6 +102,11 @@ interface EstimateResult {
     youngFamilyRatio: number;
     chronicPatientRatio: number;
   } | null;
+  workerStats?: {
+    adm_nm: string;
+    companyCnt: number;
+    workerCnt: number;
+  } | null;
   nearby: {
     busStops: { name: string; distance: number; lat?: number; lng?: number }[];
     restaurants: number;
@@ -170,19 +176,26 @@ function saveCustomStations(list: Station[]) {
 
 export default function FootTrafficAnalyzer() {
   const mapRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstance = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markerRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const circleRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const polygonRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const infoOverlayRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stationMarkersRef = useRef<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const busStopMarkersRef = useRef<any[]>([]);
   const radiusRef = useRef(500);
   const lastAnalyzedPos = useRef<{ lat: number; lng: number } | null>(null);
   const stationsRef = useRef<Station[]>([]);
 
   const [address, setAddress] = useState("");
-  const [radius, setRadius] = useState<300 | 500 | 1000>(500);
+  const [radius] = useState<300 | 500 | 1000>(500);
   const [isoOption, setIsoOption] = useState<IsochroneOption>(ISOCHRONE_OPTIONS[0]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<EstimateResult | null>(null);
@@ -392,6 +405,7 @@ export default function FootTrafficAnalyzer() {
         level: 8,
       });
       mapInstance.current = map;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       window.kakao.maps.event.addListener(map, "click", (e: any) => {
         analyzeRef.current(e.latLng.getLat(), e.latLng.getLng());
       });
@@ -867,10 +881,23 @@ export default function FootTrafficAnalyzer() {
                       {result.agePopulation ? result.agePopulation.total.toLocaleString() : "-"}
                       <span className="text-xs font-normal text-slate-500"> 명</span>
                     </p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">통계청 2020</p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">
+                      {result.agePopulation ? "행안부/통계청" : "데이터 없음"}
+                    </p>
+                  </div>
+                  {/* 직장인구 */}
+                  <div className="pl-3 pb-3">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">직장인구</p>
+                    <p className="text-xl font-bold text-slate-900 mt-0.5">
+                      {result.workerStats ? result.workerStats.workerCnt.toLocaleString() : "-"}
+                      <span className="text-xs font-normal text-slate-500"> 명</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">
+                      {result.workerStats ? `사업체 ${result.workerStats.companyCnt.toLocaleString()}개 · SGIS 2022` : "데이터 없음"}
+                    </p>
                   </div>
                   {/* 아파트 */}
-                  <div className="pl-3 pb-3">
+                  <div className="pr-3 pt-3 border-t border-slate-100">
                     <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">아파트</p>
                     <p className="text-xl font-bold text-slate-900 mt-0.5">
                       {result.apartments.totalHouseholds > 0 ? result.apartments.totalHouseholds.toLocaleString() : "-"}
@@ -879,7 +906,7 @@ export default function FootTrafficAnalyzer() {
                     <p className="text-[9px] text-slate-400 mt-0.5">카카오</p>
                   </div>
                   {/* 음식점 */}
-                  <div className="pr-3 pt-3 border-t border-slate-100">
+                  <div className="px-3 pt-3 border-t border-slate-100">
                     <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">음식점</p>
                     <p className="text-xl font-bold text-slate-900 mt-0.5">
                       {result.estimate.restaurantCount.toLocaleString()}
@@ -889,8 +916,8 @@ export default function FootTrafficAnalyzer() {
                       {result.dataQuality?.sources.restaurant === "soho" ? "소상공인DB" : "카카오"}
                     </p>
                   </div>
-                  {/* 병원 */}
-                  <div className="px-3 pt-3 border-t border-slate-100">
+                  {/* 병원/버스정류장 */}
+                  <div className="pl-3 pt-3 border-t border-slate-100">
                     <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
                       {pharmacyMode ? "병원/의원" : "버스정류장"}
                     </p>
@@ -903,7 +930,7 @@ export default function FootTrafficAnalyzer() {
                     <p className="text-[9px] text-slate-400 mt-0.5">소상공인DB</p>
                   </div>
                   {/* 주차장 */}
-                  <div className="pl-3 pt-3 border-t border-slate-100">
+                  <div className="pr-3 pt-3 border-t border-slate-100">
                     <p className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">주차장</p>
                     <p className="text-xl font-bold text-slate-900 mt-0.5">
                       {result.estimate.parkingCount.toLocaleString()}
@@ -1031,7 +1058,7 @@ export default function FootTrafficAnalyzer() {
                             <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} />
                             <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} />
                             <Tooltip
-                              formatter={(v: any) => [`${v}개`, "시설 수"]}
+                              formatter={(v: unknown) => [`${v}개`, "시설 수"]}
                               contentStyle={{ fontSize: 11, border: "1px solid #e2e8f0", borderRadius: 4 }}
                             />
                             <Bar dataKey="value" radius={[2, 2, 0, 0]}>
@@ -1200,7 +1227,7 @@ export default function FootTrafficAnalyzer() {
                       <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} interval={3} />
                       <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} domain={[0, 100]} />
                       <Tooltip
-                        formatter={(v: any) => [`${Number(v)}점`, "교통량 지수"]}
+                        formatter={(v: unknown) => [`${Number(v)}점`, "교통량 지수"]}
                         labelFormatter={(l) => `${l}대 평균`}
                         contentStyle={{ fontSize: 11, border: "1px solid #e2e8f0", borderRadius: 4 }}
                       />

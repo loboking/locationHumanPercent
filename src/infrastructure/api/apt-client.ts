@@ -45,7 +45,7 @@ export async function fetchAptsByBjdCode(bjdCode: string): Promise<AptSearchResu
     const rawItems = body.items?.item;
     if (!rawItems) return { items: [], totalCount: parseInt(body.totalCount ?? "0"), totalHouseholds: 0 };
 
-    const itemArray: any[] = Array.isArray(rawItems) ? rawItems : [rawItems];
+    const itemArray: Record<string, unknown>[] = Array.isArray(rawItems) ? rawItems : [rawItems];
 
     const items: AptBasicInfo[] = itemArray.map((item) => ({
       kaptCode: String(item.kaptCode ?? ""),
