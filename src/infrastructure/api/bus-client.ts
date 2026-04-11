@@ -90,39 +90,32 @@ export interface GbisStation {
   distanceM: number;
 }
 
-// 경기도 GBIS: 좌표 기반 버스정류소 조회
-// 카카오 키워드 검색이 미인덱스한 신도시 정류소까지 포함
+// OpenStreetMap Overpass API: 좌표 기반 버스정류소 조회
+// 신도시 포함 전국 커버, 무료, 카카오 키워드 미인덱스 정류소까지 포함
 export async function getBusStationsByPos(
   lat: number,
   lng: number,
   radiusM = 500
 ): Promise<GbisStation[]> {
-  const params = new URLSearchParams({
-    serviceKey: SERVICE_KEY,
-    numOfRows: "30",
-    pageNo: "1",
-    gpsLati: String(lat),
-    gpsLong: String(lng),
-    radius: String(radiusM),
-    format: "json",
-  });
+  // Overpass QL: highway=bus_stop + public_transport=stop_position 합산
+  const query = `[out:json][timeout:8];(node["highway"="bus_stop"](around:${radiusM},${lat},${lng});node["public_transport"="stop_position"](around:${radiusM},${lat},${lng}););out;`;
 
   try {
-    const res = await fetch(
-      `https://apis.data.go.kr/6410000/busstationservice/v2/getBusStationListv2?${params}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      body: query,
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return [];
     const data = await res.json();
-    const list = data.response?.msgBody?.busStationList ?? [];
-    const arr = Array.isArray(list) ? list : [list];
-    return arr
-      .filter((s: Record<string, unknown>) => s.gpsLati && s.gpsLong)
-      .map((s: Record<string, unknown>) => {
-        const sLat = parseFloat(String(s.gpsLati));
-        const sLng = parseFloat(String(s.gpsLong));
-        // haversine distance
-        const R = 6371000;
+    const elements: Record<string, unknown>[] = data.elements ?? [];
+
+    const R = 6371000;
+    return elements
+      .filter((e) => typeof e.lat === "number" && typeof e.lon === "number")
+      .map((e) => {
+        const sLat = e.lat as number;
+        const sLng = e.lon as number;
         const dLat = ((sLat - lat) * Math.PI) / 180;
         const dLng = ((sLng - lng) * Math.PI) / 180;
         const a =
@@ -130,9 +123,10 @@ export async function getBusStationsByPos(
           Math.cos((lat * Math.PI) / 180) * Math.cos((sLat * Math.PI) / 180) *
           Math.sin(dLng / 2) ** 2;
         const distanceM = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+        const tags = (e.tags ?? {}) as Record<string, string>;
         return {
-          stationId: parseInt(String(s.stationId ?? 0)),
-          stationName: String(s.stationName ?? ""),
+          stationId: parseInt(String(e.id ?? 0)),
+          stationName: tags.name ?? tags["name:ko"] ?? "버스정류장",
           lat: sLat,
           lng: sLng,
           distanceM,
