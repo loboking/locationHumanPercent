@@ -208,7 +208,6 @@ export default function FootTrafficAnalyzer() {
   const [newStation, setNewStation] = useState({ name: "", lat: "", lng: "" });
   const [pharmacyMode, setPharmacyMode] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState(0);
 
   const copyAddress = useCallback((addr: string) => {
     navigator.clipboard.writeText(addr).then(() => {
@@ -314,7 +313,6 @@ export default function FootTrafficAnalyzer() {
       }
       const data: EstimateResult = await res.json();
       setResult(data);
-      setActiveTab(0);
 
       if (mapInstance.current && window.kakao?.maps) {
         const pos = new window.kakao.maps.LatLng(data.coordinates.lat, data.coordinates.lng);
@@ -665,24 +663,6 @@ export default function FootTrafficAnalyzer() {
           </div>
         )}
 
-        {/* 탭 */}
-        {result && !loading && (
-          <div className="flex border-b border-slate-100 shrink-0 bg-white">
-            {["입지 분석", "상권", "인구·연령", "교통·접근성"].map((tab, i) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(i)}
-                className={clsx(
-                  "flex-1 py-2 text-[10px] font-semibold transition-colors border-b-2",
-                  activeTab === i ? "text-blue-600 border-blue-600" : "text-slate-400 border-transparent hover:text-slate-600"
-                )}
-              >
-                {i + 1}. {tab}
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* 스크롤 컨텐츠 */}
         <div suppressHydrationWarning className="flex-1 overflow-y-auto">
           {loading && (
@@ -695,8 +675,7 @@ export default function FootTrafficAnalyzer() {
 
           {result && !loading && (
             <div className="p-3 space-y-3">
-              {/* ─ TAB 0: 입지 분석 ─ */}
-              {activeTab === 0 && (<>
+              {/* ── 입지 분석 ── */}
               {/* ── 1. 분석 개요 카드 ── */}
               <div className="bg-white border border-slate-200 rounded-lg p-4">
                 {/* 헤더: 주소 + 등급 배지 */}
@@ -952,10 +931,8 @@ export default function FootTrafficAnalyzer() {
                   </div>
                 </div>
               </div>
-              </>)}
 
-              {/* ─ TAB 1: 상권 ─ */}
-              {activeTab === 1 && (<>
+              {/* ── 상권 ── */}
               {/* ── 3. 상권 현황 테이블 ── */}
               <div className="bg-white border border-slate-200 rounded-lg p-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-0">
@@ -1088,10 +1065,8 @@ export default function FootTrafficAnalyzer() {
                   출처: 소상공인진흥공단 상가정보DB &middot; 카카오 Local API
                 </p>
               </div>
-              </>)}
 
-              {/* ─ TAB 2: 인구·연령 ─ */}
-              {activeTab === 2 && (<>
+              {/* ── 인구·연령 ── */}
               {/* ── 4. 연령별 거주인구 ── */}
               {result.agePopulation && (
                 <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -1204,10 +1179,8 @@ export default function FootTrafficAnalyzer() {
                   </p>
                 </div>
               )}
-              </>)}
 
-              {/* ─ TAB 3: 교통·접근성 ─ */}
-              {activeTab === 3 && (<>
+              {/* ── 교통·접근성 ── */}
               {/* ── 5. 교통량 이력 차트 ── */}
               {result.trafficHistory && result.trafficHistory.dataPoints === 0 && (
                 <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -1339,7 +1312,6 @@ export default function FootTrafficAnalyzer() {
                   </p>
                 </div>
               )}
-              </>)}
             </div>
           )}
 
