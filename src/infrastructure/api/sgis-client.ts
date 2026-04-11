@@ -1,9 +1,13 @@
-// 인구 연령 통계 - 1순위: 행안부 주민등록인구통계(data.go.kr), 2순위: SGIS(통계청 2020 인구총조사)
-// 행안부 API: 월별 업데이트, H-type 행정동 코드 직접 사용
-// SGIS 폴백: 행안부 실패 시 2020년 인구총조사 데이터 사용
+// 인구 연령 통계
+// 1순위: 행안부 주민등록인구통계(data.go.kr) - 월별 업데이트
+// 2순위: KOSIS 국가통계포털 - 주민등록인구현황 2024년 (읍면동/5세별)
+// 3순위: SGIS 통계청 2020 인구총조사 (최후 폴백)
 
 const SERVICE_KEY = process.env.PUBLIC_DATA_SERVICE_KEY!;
 const MOIS_BASE = "https://apis.data.go.kr/1741000/rsdntrgstatsvc";
+
+const KOSIS_KEY = process.env.KOSIS_API_KEY!;
+const KOSIS_BASE = "https://kosis.kr/openapi/Param/statisticsParameterData.do";
 
 const SGIS_KEY = process.env.SGIS_CONSUMER_KEY!;
 const SGIS_SECRET = process.env.SGIS_CONSUMER_SECRET!;
@@ -83,7 +87,61 @@ async function fetchMoisPopulation(admCd: string, admNm: string): Promise<AgePop
   }
 }
 
-// ── 2순위: SGIS 통계청 인구총조사(2020) ─────────────────────────
+// ── 2순위: KOSIS 주민등록인구현황 (2024년, 읍면동/5세별) ──────────
+// tblId: DT_1B04005N, orgId: 101(통계청)
+// objL1: 행정동 코드 10자리 (Kakao H-type 그대로 사용)
+async function fetchKosisPopulation(admCd: string, admNm: string): Promise<AgePopulation | null> {
+  if (!KOSIS_KEY) return null;
+
+  // KOSIS 행정구역 코드 = Kakao H-type 10자리
+  const params = new URLSearchParams({
+    method:      "getList",
+    apiKey:      KOSIS_KEY,
+    itmId:       "T1+",
+    objL1:       admCd,
+    objL2:       "0",    // 총계 (성별 무관)
+    objL3:       "ALL",  // 전 연령
+    format:      "json",
+    jsonVD:      "Y",
+    prdSe:       "Y",
+    startPrdDe:  "2024",
+    endPrdDe:    "2024",
+    orgId:       "101",
+    tblId:       "DT_1B04005N",
+  });
+
+  try {
+    const res = await fetch(`${KOSIS_BASE}?${params}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    const buckets = [0, 0, 0, 0, 0, 0, 0, 0];
+    let total = 0;
+
+    for (const item of data) {
+      const ageNm: string = item.C3_NM ?? "";
+      const pop = parseInt(item.DT ?? "0", 10) || 0;
+      // "계" (소계) 항목 제외, 유효 인구만
+      if (pop <= 0 || ageNm === "계" || ageNm === "합계") continue;
+
+      const match = ageNm.match(/^(\d+)/);
+      if (!match) continue;
+      const age = parseInt(match[1], 10);
+      total += pop;
+      buckets[Math.min(Math.floor(age / 10), 7)] += pop;
+    }
+
+    if (total === 0) return null;
+    return buildResult(admCd, admNm, buckets, total);
+  } catch {
+    return null;
+  }
+}
+
+// ── 3순위: SGIS 통계청 인구총조사(2020) ─────────────────────────
 async function getSgisToken(): Promise<string | null> {
   if (sgisTokenCache && Date.now() < sgisTokenCache.expiresAt) {
     return sgisTokenCache.token;
@@ -257,10 +315,14 @@ export async function getAgePopulationByRegion(
 ): Promise<AgePopulation | null> {
   if (!admCd && !admNm) return null;
 
-  // 행안부 API 우선 시도
+  // 1순위: 행안부 주민등록인구통계 (매월 최신)
   const moisResult = await fetchMoisPopulation(admCd, admNm);
   if (moisResult) return moisResult;
 
-  // 행안부 실패 시 SGIS 폴백
+  // 2순위: KOSIS 주민등록인구현황 (2024년)
+  const kosisResult = await fetchKosisPopulation(admCd, admNm);
+  if (kosisResult) return kosisResult;
+
+  // 3순위: SGIS 인구총조사 2020 (최후 폴백)
   return fetchSgisPopulation(admCd, admNm);
 }
