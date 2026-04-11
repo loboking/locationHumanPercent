@@ -11,7 +11,8 @@ import {
 import { searchSohoRestaurantCount, searchSohoCount } from "@/infrastructure/api/soho-client";
 import { getAgePopulationByRegion, getWorkersByRegion } from "@/infrastructure/api/sgis-client";
 import { getIsochrone, isPointInPolygon } from "@/infrastructure/api/isochrone-client";
-import { PYEONGTAEK_STATIONS } from "@/infrastructure/api/bus-client";
+import { PYEONGTAEK_STATIONS, getBusStationsByPos } from "@/infrastructure/api/bus-client";
+import { fetchAptsByBjdCode } from "@/infrastructure/api/apt-client";
 import { getTmapTrafficScore, getTmapRouteMatrix } from "@/infrastructure/api/tmap-client";
 import { prisma } from "@/lib/prisma";
 
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 지역 코드 조회 (행안부 주민등록 인구용)
-  let moisAdmCd = "", moisAdmNm = "";
+  let moisAdmCd = "", moisAdmNm = "", bjdCode = "";
   try {
     const rgCodeRes = await fetch(
       `https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=${lng}&y=${lat}`,
@@ -79,14 +80,18 @@ export async function GET(req: NextRequest) {
       moisAdmNm = [hDoc.region_1depth_name, hDoc.region_2depth_name, hDoc.region_3depth_name]
         .filter(Boolean).join(" ");
     }
+    const bDoc = (rgCodeData.documents ?? []).find((d: Record<string, string>) => d.region_type === "B");
+    if (bDoc) bjdCode = bDoc.code ?? "";
   } catch { /* 무시 */ }
 
-  // 이소크론 + 행안부 연령별 인구 + T맵 교통정보 병렬 조회
-  const [isochrone, agePopulation, workerStats, tmapTraffic] = await Promise.all([
+  // 이소크론 + 행안부 연령별 인구 + T맵 교통정보 + GBIS 버스정류소 + 국토부 아파트 병렬 조회
+  const [isochrone, agePopulation, workerStats, tmapTraffic, gbisStations, aptOfficialData] = await Promise.all([
     getIsochrone(lat, lng, isoMode, isoMinutes),
     moisAdmCd ? getAgePopulationByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     moisAdmCd ? getWorkersByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     getTmapTrafficScore(lat, lng, 1),
+    getBusStationsByPos(lat, lng, Math.min(radius, 1000)),
+    bjdCode ? fetchAptsByBjdCode(bjdCode) : Promise.resolve(null),
   ]);
   // 검색 반경은 항상 고정 (이소크론 크기와 무관)
   // 이소크론은 mobilityScore(이동 편의성 측정)에만 사용 → 구도심/신도시 공정 비교
@@ -136,6 +141,14 @@ export async function GET(req: NextRequest) {
   if (busStopCount === 0 && stationsInRadius.length > 0) {
     busStopCount = stationsInRadius.length;
   }
+
+  // GBIS와 Kakao 버스정류장 병합 (중복은 거리 기준 제거)
+  const gbisCount = gbisStations.length;
+  const kakaoCount = busResult.totalCount;
+  busStopCount = Math.max(kakaoCount, gbisCount, busStopCount);
+
+  // 공식 세대수: 국토부 아파트 API (없으면 카카오 추정치 유지)
+  const officialHouseholds = aptOfficialData?.totalHouseholds ?? 0;
 
   // 가장 가까운 모니터링 정류장
   let nearestStation = PYEONGTAEK_STATIONS[0];
@@ -191,6 +204,7 @@ export async function GET(req: NextRequest) {
     isoMode,
     agePopulation?.total      ?? 0,   // 실거주 인구 수
     workerStats?.workerCnt    ?? 0,   // 직장인구 수
+    tmapMatrix?.within10min   ?? 0,   // 차량 10분권 단지 수
   );
 
   // 약국 전용 점수
@@ -208,6 +222,7 @@ export async function GET(req: NextRequest) {
     agePopulation?.total              ?? 0,   // 실거주 인구 수
     workerStats?.workerCnt            ?? 0,   // 직장인구 수
     radius,                                   // 밀도 계산용 고정 반경
+    tmapMatrix?.within10min           ?? 0,   // 차량 10분권 단지 수
   );
 
   // 데이터 신뢰도 평가 (Phase 1: 실데이터 비율 산출)
@@ -254,7 +269,8 @@ export async function GET(req: NextRequest) {
       realDataRatio: Math.round(realDataRatio * 100),
       sources: {
         restaurant: sohoResult.totalCount > 0 ? "soho" : "kakao",
-        busStop: kakaoHasBusData ? "kakao" : "fallback",
+        busStop: kakaoHasBusData ? "kakao" : gbisCount > 0 ? "gbis" : "fallback",
+        gbisStations: gbisCount,
         trafficHistory: trafficHistory.length >= 24 ? "db" : trafficHistory.length > 0 ? "db_partial" : "none",
         isochrone: isochrone ? "valhalla" : "circle_fallback",
       },
@@ -266,6 +282,7 @@ export async function GET(req: NextRequest) {
           const distM = Math.round(haversineKm(lat, lng, s.lat, s.lng) * 1000);
           return { name: s.name, distance: distM, lat: s.lat, lng: s.lng };
         }),
+        ...gbisStations.slice(0, 3).map((s) => ({ name: s.stationName, distance: s.distanceM, lat: s.lat, lng: s.lng })),
       ].sort((a, b) => a.distance - b.distance).slice(0, 5),
       restaurants: activeRestaurantCount,
       restaurantSource: sohoResult.totalCount > 0 ? "soho" : "kakao",

@@ -239,6 +239,7 @@ export function calcPharmacyScore(
   residentTotal = 0,         // 실거주 인구 수 (agePopulation.total)
   workerCount = 0,           // 직장인구 수 (workerStats.workerCnt)
   fixedRadius = 500,         // 밀도 계산용 고정 반경 (m) — 이소크론 면적 대신 사용
+  within10minApts = 0,       // 차량 10분권 단지 수 (T맵 경로 매트릭스)
 ): PharmacyScoreResult {
   // 밀도 계산에는 항상 고정 반경 사용 → 구도심/신도시 공정 비교
   const areaKm2 = Math.PI * (fixedRadius / 1000) ** 2;
@@ -307,8 +308,10 @@ export function calcPharmacyScore(
   const parkingScore = Math.min(Math.round(parkingCount * 7 / 6), 7);
   // D3. 편의시설 (3점): 편의점 인접 → 생활동선 내 위치 지표
   const convAccessScore = Math.min(Math.round(convStoreCount / 3), 3);
+  // D4. 차량 10분권 배후 단지 (3점): T맵 경로 매트릭스
+  const carCatchmentScore = Math.min(Math.floor(within10minApts / 10), 3);
 
-  const accessScore = Math.min(mobilityScore + parkingScore + convAccessScore, 20);
+  const accessScore = Math.min(mobilityScore + parkingScore + convAccessScore + carCatchmentScore, 20);
 
   // ── E. 경쟁 환경 (20점) ───────────────────────────────────────────────────
   // E1. 경쟁 약국 절대 수 (10점)
@@ -408,6 +411,7 @@ export interface FootTrafficEstimate {
     mobilityScore: number;
     busScore: number;
     parkingScore: number;
+    carAccessBonus: number;
     commerceScore: number;
     residentialScore: number;
     populationScore: number;   // /20 실거주+직장인구
@@ -435,6 +439,7 @@ export function calcFootTrafficEstimate(
   isoMode: "car" | "walk" = "car",
   residentTotal = 0,    // 실거주 인구 수
   workerCount = 0,      // 직장인구 수
+  within10minApts = 0,  // 차량 10분권 단지 수
 ): FootTrafficEstimate {
   // 밀도 계산용: 항상 고정 반경 원형 면적 (구도심/신도시 공정 비교)
   const areaKm2 = Math.PI * (radius / 1000) ** 2;
@@ -457,7 +462,9 @@ export function calcFootTrafficEstimate(
   const busScore = Math.min(busStops * 2, 6);
   // 주차 접근성 (4점): 주차장 1개당 1점, 4개=만점
   const parkingScore = Math.min(parkingCount, 4);
-  const transitScore = mobilityScore + busScore + parkingScore;
+  // 차량 10분 내 아파트 단지 수 보너스 (0~3점): T맵 경로 매트릭스 기반
+  const carAccessBonus = Math.min(Math.floor(within10minApts / 5), 3);
+  const transitScore = Math.min(mobilityScore + busScore + parkingScore + carAccessBonus, 20);
 
   // ── 상권 활성도 (35점) — 밀도(개수/km²) 기반 ────────────────
   // 만점 기준: 음식점 120/km², 카페 40/km², 편의점 16/km² (도심 상업지구 수준)
@@ -535,7 +542,7 @@ export function calcFootTrafficEstimate(
     convStoreCount: convStores,
     parkingCount,
     totalHouseholds,
-    detail: { transitScore, mobilityScore, busScore, parkingScore, commerceScore, residentialScore, populationScore },
+    detail: { transitScore, mobilityScore, busScore, parkingScore, carAccessBonus, commerceScore, residentialScore, populationScore },
     density: {
       areaKm2: Math.round(areaKm2 * 100) / 100,
       restaurantPer1km2: Math.round(rDensity),

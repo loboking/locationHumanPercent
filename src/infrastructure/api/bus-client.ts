@@ -82,6 +82,69 @@ export function calcTrafficIndex(arrivals: BusArrival[]): {
   return { score, routeCount, activeCount, avgCrowded, grade };
 }
 
+export interface GbisStation {
+  stationId: number;
+  stationName: string;
+  lat: number;
+  lng: number;
+  distanceM: number;
+}
+
+// 경기도 GBIS: 좌표 기반 버스정류소 조회
+// 카카오 키워드 검색이 미인덱스한 신도시 정류소까지 포함
+export async function getBusStationsByPos(
+  lat: number,
+  lng: number,
+  radiusM = 500
+): Promise<GbisStation[]> {
+  const params = new URLSearchParams({
+    serviceKey: SERVICE_KEY,
+    numOfRows: "30",
+    pageNo: "1",
+    gpsLati: String(lat),
+    gpsLong: String(lng),
+    radius: String(radiusM),
+    format: "json",
+  });
+
+  try {
+    const res = await fetch(
+      `https://apis.data.go.kr/6410000/busstationservice/v2/getBusStationListv2?${params}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list = data.response?.msgBody?.busStationList ?? [];
+    const arr = Array.isArray(list) ? list : [list];
+    return arr
+      .filter((s: Record<string, unknown>) => s.gpsLati && s.gpsLong)
+      .map((s: Record<string, unknown>) => {
+        const sLat = parseFloat(String(s.gpsLati));
+        const sLng = parseFloat(String(s.gpsLong));
+        // haversine distance
+        const R = 6371000;
+        const dLat = ((sLat - lat) * Math.PI) / 180;
+        const dLng = ((sLng - lng) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat * Math.PI) / 180) * Math.cos((sLat * Math.PI) / 180) *
+          Math.sin(dLng / 2) ** 2;
+        const distanceM = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+        return {
+          stationId: parseInt(String(s.stationId ?? 0)),
+          stationName: String(s.stationName ?? ""),
+          lat: sLat,
+          lng: sLng,
+          distanceM,
+        };
+      })
+      .filter((s) => s.distanceM <= radiusM)
+      .sort((a, b) => a.distanceM - b.distanceM);
+  } catch {
+    return [];
+  }
+}
+
 // 평택시 주요 정류장 목록 (좌표 포함 — foot-traffic/route.ts 동기화 불필요)
 export const PYEONGTAEK_STATIONS = [
   { id: 233000375, name: "고덕신도시입구",  area: "고덕동",  lat: 37.0506, lng: 127.0437 },
