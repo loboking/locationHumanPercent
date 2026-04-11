@@ -96,22 +96,25 @@ export async function GET(req: NextRequest) {
     getAreaCodeByLocation(lat, lng, radius),
   ]);
 
-  // 상권코드 → 소상공인 유동인구 실측치 조회 (분기 데이터, 순차 의존)
+  // 상권코드 → 소상공인 유동인구 실측치 조회
+  // semas 데이터는 약 6개월 지연 공개 → 최근 6분기까지 역순 탐색
   let semasTraffic = null;
+  let semasDataPeriod = "";
   if (areaInfo?.trarNo) {
     try {
       const now = new Date();
-      const year = String(now.getFullYear());
-      // 현재 분기 계산 (1~4분기)
-      const quarter = String(Math.ceil((now.getMonth() + 1) / 3));
-      const res = await fetchFootTraffic(areaInfo.trarNo, year, quarter);
-      semasTraffic = res.data?.[0] ?? null;
-      // 해당 분기 데이터 없으면 직전 분기 시도
-      if (!semasTraffic) {
-        const prevQuarter = quarter === "1" ? "4" : String(parseInt(quarter) - 1);
-        const prevYear = quarter === "1" ? String(parseInt(year) - 1) : year;
-        const res2 = await fetchFootTraffic(areaInfo.trarNo, prevYear, prevQuarter);
-        semasTraffic = res2.data?.[0] ?? null;
+      let y = now.getFullYear();
+      let q = Math.ceil((now.getMonth() + 1) / 3);
+      for (let i = 0; i < 6; i++) {
+        // 1분기씩 거슬러 올라가기
+        q--;
+        if (q === 0) { q = 4; y--; }
+        const res = await fetchFootTraffic(areaInfo.trarNo, String(y), String(q));
+        if (res.data?.[0]) {
+          semasTraffic = res.data[0];
+          semasDataPeriod = `${y}년 ${q}분기`;
+          break;
+        }
       }
     } catch { /* 미지원 상권 → null 유지 */ }
   }
@@ -303,6 +306,7 @@ export async function GET(req: NextRequest) {
     semasFootTraffic: semasTraffic ? {
       areaCode: areaInfo?.trarNo,
       areaName: areaInfo?.mainTrarNm,
+      period: semasDataPeriod,
       total: semasTraffic["총_유동인구_수"],
       male: semasTraffic["남성_유동인구_수"],
       female: semasTraffic["여성_유동인구_수"],
