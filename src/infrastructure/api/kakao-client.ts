@@ -240,6 +240,7 @@ export function calcPharmacyScore(
   workerCount = 0,           // 직장인구 수 (workerStats.workerCnt)
   fixedRadius = 500,         // 밀도 계산용 고정 반경 (m) — 이소크론 면적 대신 사용
   within10minApts = 0,       // 차량 10분권 단지 수 (T맵 경로 매트릭스)
+  semasFloatingPop = 0,      // 소상공인 유동인구 실측치
 ): PharmacyScoreResult {
   // 밀도 계산에는 항상 고정 반경 사용 → 구도심/신도시 공정 비교
   const areaKm2 = Math.PI * (fixedRadius / 1000) ** 2;
@@ -281,17 +282,24 @@ export function calcPharmacyScore(
   // ── C. 유동·직장인구 (15점) ───────────────────────────────────────────────
   // 신규 항목: 낮 시간대 방문 수요 (구도심 상업지역 + 신도시 직장인 모두 반영)
 
-  // C1. 직장인구 (10점): SGIS 종사자 수 기준
+  // C1. 직장인구 (7점): SGIS 종사자 수 기준
   const workerScore =
-    workerCount >= 10000 ? 10 :
-    workerCount >=  5000 ?  7 :
-    workerCount >=  2000 ?  4 :
-    workerCount >=   500 ?  2 : 0;
+    workerCount >= 10000 ? 7 :
+    workerCount >=  5000 ? 5 :
+    workerCount >=  2000 ? 3 :
+    workerCount >=   500 ? 1 : 0;
 
-  // C2. 버스·대중교통 접근 (5점)
-  const transitAccessScore = Math.min(busStops * 2, 5);
+  // C2. 버스·대중교통 접근 (4점)
+  const transitAccessScore = Math.min(busStops * 2, 4);
 
-  const workforceScore = Math.min(workerScore + transitAccessScore, 15);
+  // C3. 유동인구 실측 (4점): 소상공인 상권 분기 데이터
+  const semasWorkforceScore =
+    semasFloatingPop >= 500000 ? 4 :
+    semasFloatingPop >= 200000 ? 3 :
+    semasFloatingPop >= 100000 ? 2 :
+    semasFloatingPop >=  50000 ? 1 : 0;
+
+  const workforceScore = Math.min(workerScore + transitAccessScore + semasWorkforceScore, 15);
 
   // ── D. 접근성 (20점) ──────────────────────────────────────────────────────
   // D1. 이동 가능 범위 (10점): 이소크론 실측 면적 기준 (밀도 계산과 별도)
@@ -437,9 +445,10 @@ export function calcFootTrafficEstimate(
   isochroneAreaM2?: number,
   parkingCount = 0,
   isoMode: "car" | "walk" = "car",
-  residentTotal = 0,    // 실거주 인구 수
-  workerCount = 0,      // 직장인구 수
-  within10minApts = 0,  // 차량 10분권 단지 수
+  residentTotal = 0,        // 실거주 인구 수
+  workerCount = 0,          // 직장인구 수
+  within10minApts = 0,      // 차량 10분권 단지 수
+  semasFloatingPop = 0,     // 소상공인 유동인구 실측치 (분기 데이터)
 ): FootTrafficEstimate {
   // 밀도 계산용: 항상 고정 반경 원형 면적 (구도심/신도시 공정 비교)
   const areaKm2 = Math.PI * (radius / 1000) ** 2;
@@ -502,22 +511,30 @@ export function calcFootTrafficEstimate(
   const totalHouseholds = aptComplexCount * 700;
 
   // ── 유동 인구 (20점) ─────────────────────────────────────────
-  // D1. 실거주인구 (12점)
+  // D1. 실거주인구 (8점)
   const residentPopScore =
-    residentTotal >= 30000 ? 12 :
-    residentTotal >= 20000 ?  9 :
-    residentTotal >= 10000 ?  6 :
-    residentTotal >=  5000 ?  3 :
-    residentTotal >       0 ?  1 : 0;
+    residentTotal >= 30000 ? 8 :
+    residentTotal >= 20000 ? 6 :
+    residentTotal >= 10000 ? 4 :
+    residentTotal >=  5000 ? 2 :
+    residentTotal >       0 ? 1 : 0;
 
-  // D2. 직장인구 (8점)
+  // D2. 직장인구 (6점)
   const workerPopScore =
-    workerCount >= 10000 ? 8 :
-    workerCount >=  5000 ? 6 :
-    workerCount >=  2000 ? 3 :
+    workerCount >= 10000 ? 6 :
+    workerCount >=  5000 ? 4 :
+    workerCount >=  2000 ? 2 :
     workerCount >=   500 ? 1 : 0;
 
-  const populationScore = Math.min(residentPopScore + workerPopScore, 20);
+  // D3. 유동인구 실측 (6점): 소상공인 상권 분기 데이터 — 가장 직접적인 유동인구 지표
+  const semasPopScore =
+    semasFloatingPop >= 500000 ? 6 :
+    semasFloatingPop >= 200000 ? 4 :
+    semasFloatingPop >= 100000 ? 3 :
+    semasFloatingPop >=  50000 ? 2 :
+    semasFloatingPop >        0 ? 1 : 0;
+
+  const populationScore = Math.min(residentPopScore + workerPopScore + semasPopScore, 20);
 
   const rawTotal = transitScore + commerceScore + residentialScore + populationScore;
   // 이소크론(실도로망) 없을 때 → 원형 추정 신뢰도 90% 적용 (신도시 과소평가 방지)

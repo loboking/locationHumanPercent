@@ -88,6 +88,40 @@ export async function searchSohoCount(
   return fetchSohoInRadius(lat, lng, SOHO_CODES[category], radius);
 }
 
+// 좌표 → 상권코드 조회 (storeZoneInRadius)
+// 반환된 trarNo를 semas-client fetchFootTraffic의 areaCode로 사용
+export async function getAreaCodeByLocation(
+  lat: number,
+  lng: number,
+  radius = 500
+): Promise<{ trarNo: string; mainTrarNm: string } | null> {
+  const params = new URLSearchParams({
+    serviceKey: SERVICE_KEY,
+    cx:         String(lng),
+    cy:         String(lat),
+    radius:     String(radius),
+    type:       "json",
+  });
+
+  try {
+    const res = await fetch(`${BASE}/storeZoneInRadius/v1?${params}`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const raw = data.body?.items;
+    const items: Record<string, string>[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    if (items.length === 0) return null;
+    // 면적 가장 작은 상권 우선 (핀포인트에 가장 가까운 상권)
+    const sorted = [...items].sort(
+      (a, b) => parseFloat(a.trarArea ?? "9e9") - parseFloat(b.trarArea ?? "9e9")
+    );
+    return { trarNo: sorted[0].trarNo ?? "", mainTrarNm: sorted[0].mainTrarNm ?? "" };
+  } catch {
+    return null;
+  }
+}
+
 // 음식점 조회 (기존 인터페이스 유지)
 export async function searchSohoRestaurantCount(
   lat: number,

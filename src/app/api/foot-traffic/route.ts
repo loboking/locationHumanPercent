@@ -8,7 +8,8 @@ import {
   calcFootTrafficEstimate,
   calcPharmacyScore,
 } from "@/infrastructure/api/kakao-client";
-import { searchSohoRestaurantCount, searchSohoCount } from "@/infrastructure/api/soho-client";
+import { searchSohoRestaurantCount, searchSohoCount, getAreaCodeByLocation } from "@/infrastructure/api/soho-client";
+import { fetchFootTraffic } from "@/infrastructure/api/semas-client";
 import { getAgePopulationByRegion, getWorkersByRegion } from "@/infrastructure/api/sgis-client";
 import { getIsochrone, isPointInPolygon } from "@/infrastructure/api/isochrone-client";
 import { PYEONGTAEK_STATIONS, getBusStationsByPos } from "@/infrastructure/api/bus-client";
@@ -84,15 +85,36 @@ export async function GET(req: NextRequest) {
     if (bDoc) bjdCode = bDoc.code ?? "";
   } catch { /* 무시 */ }
 
-  // 이소크론 + 행안부 연령별 인구 + T맵 교통정보 + GBIS 버스정류소 + 국토부 아파트 병렬 조회
-  const [isochrone, agePopulation, workerStats, tmapTraffic, gbisStations, aptOfficialData] = await Promise.all([
+  // 이소크론 + 행안부 연령별 인구 + T맵 교통정보 + GBIS 버스정류소 + 국토부 아파트 + 상권코드 병렬 조회
+  const [isochrone, agePopulation, workerStats, tmapTraffic, gbisStations, aptOfficialData, areaInfo] = await Promise.all([
     getIsochrone(lat, lng, isoMode, isoMinutes),
     moisAdmCd ? getAgePopulationByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     moisAdmCd ? getWorkersByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     getTmapTrafficScore(lat, lng, 1),
     getBusStationsByPos(lat, lng, Math.min(radius, 1000)),
     bjdCode ? fetchAptsByBjdCode(bjdCode) : Promise.resolve(null),
+    getAreaCodeByLocation(lat, lng, radius),
   ]);
+
+  // 상권코드 → 소상공인 유동인구 실측치 조회 (분기 데이터, 순차 의존)
+  let semasTraffic = null;
+  if (areaInfo?.trarNo) {
+    try {
+      const now = new Date();
+      const year = String(now.getFullYear());
+      // 현재 분기 계산 (1~4분기)
+      const quarter = String(Math.ceil((now.getMonth() + 1) / 3));
+      const res = await fetchFootTraffic(areaInfo.trarNo, year, quarter);
+      semasTraffic = res.data?.[0] ?? null;
+      // 해당 분기 데이터 없으면 직전 분기 시도
+      if (!semasTraffic) {
+        const prevQuarter = quarter === "1" ? "4" : String(parseInt(quarter) - 1);
+        const prevYear = quarter === "1" ? String(parseInt(year) - 1) : year;
+        const res2 = await fetchFootTraffic(areaInfo.trarNo, prevYear, prevQuarter);
+        semasTraffic = res2.data?.[0] ?? null;
+      }
+    } catch { /* 미지원 상권 → null 유지 */ }
+  }
   // 검색 반경은 항상 고정 (이소크론 크기와 무관)
   // 이소크론은 mobilityScore(이동 편의성 측정)에만 사용 → 구도심/신도시 공정 비교
   const searchRadius = radius;
@@ -205,6 +227,7 @@ export async function GET(req: NextRequest) {
     agePopulation?.total      ?? 0,   // 실거주 인구 수
     workerStats?.workerCnt    ?? 0,   // 직장인구 수
     tmapMatrix?.within10min   ?? 0,   // 차량 10분권 단지 수
+    semasTraffic?.["총_유동인구_수"] ?? 0,  // 소상공인 유동인구 실측치
   );
 
   // 약국 전용 점수
@@ -217,12 +240,13 @@ export async function GET(req: NextRequest) {
     scaledAptCount,
     isochrone?.areaM2,
     isoMode,
-    agePopulation?.chronicPatientRatio ?? 0,  // 만성질환층(50-60대) 비중
-    agePopulation?.youngFamilyRatio   ?? 0,   // 30-40대 육아세대 비중
-    agePopulation?.total              ?? 0,   // 실거주 인구 수
-    workerStats?.workerCnt            ?? 0,   // 직장인구 수
-    radius,                                   // 밀도 계산용 고정 반경
-    tmapMatrix?.within10min           ?? 0,   // 차량 10분권 단지 수
+    agePopulation?.chronicPatientRatio ?? 0,
+    agePopulation?.youngFamilyRatio   ?? 0,
+    agePopulation?.total              ?? 0,
+    workerStats?.workerCnt            ?? 0,
+    radius,
+    tmapMatrix?.within10min           ?? 0,
+    semasTraffic?.["총_유동인구_수"] ?? 0,  // 소상공인 유동인구 실측치
   );
 
   // 데이터 신뢰도 평가 (Phase 1: 실데이터 비율 산출)
@@ -273,8 +297,21 @@ export async function GET(req: NextRequest) {
         gbisStations: gbisCount,
         trafficHistory: trafficHistory.length >= 24 ? "db" : trafficHistory.length > 0 ? "db_partial" : "none",
         isochrone: isochrone ? "valhalla" : "circle_fallback",
+        floatingPop: semasTraffic ? "semas" : "none",
       },
     },
+    semasFootTraffic: semasTraffic ? {
+      areaCode: areaInfo?.trarNo,
+      areaName: areaInfo?.mainTrarNm,
+      total: semasTraffic["총_유동인구_수"],
+      male: semasTraffic["남성_유동인구_수"],
+      female: semasTraffic["여성_유동인구_수"],
+      age20s: semasTraffic["연령대_20_유동인구_수"],
+      age30s: semasTraffic["연령대_30_유동인구_수"],
+      age40s: semasTraffic["연령대_40_유동인구_수"],
+      age50s: semasTraffic["연령대_50_유동인구_수"],
+      age60s: semasTraffic["연령대_60_이상_유동인구_수"],
+    } : null,
     nearby: {
       busStops: [
         ...busResult.places.slice(0, 3).map((s) => ({ name: s.placeName, distance: s.distance, lat: s.lat, lng: s.lng })),
