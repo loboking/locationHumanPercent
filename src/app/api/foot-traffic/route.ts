@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
     moisAdmCd ? getAgePopulationByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     moisAdmCd ? getWorkersByRegion(moisAdmCd, moisAdmNm) : Promise.resolve(null),
     getTmapTrafficScore(lat, lng, 1),
-    getBusStationsByPos(lat, lng, Math.min(radius, 1000)),
+    getBusStationsByPos(lat, lng),
     bjdCode ? fetchAptsByBjdCode(bjdCode) : Promise.resolve(null),
     getAreaCodeByLocation(lat, lng, radius),
   ]);

@@ -90,32 +90,40 @@ export interface GbisStation {
   distanceM: number;
 }
 
-// OpenStreetMap Overpass API: 좌표 기반 버스정류소 조회
-// 신도시 포함 전국 커버, 무료, 카카오 키워드 미인덱스 정류소까지 포함
+// 국토교통부 전국 버스정류소 좌표 기반 조회 (반경 500m 고정)
+// 전국 커버, 신도시/구도심 모두 정확, PUBLIC_DATA_SERVICE_KEY 사용
 export async function getBusStationsByPos(
   lat: number,
   lng: number,
-  radiusM = 500
 ): Promise<GbisStation[]> {
-  // Overpass QL: highway=bus_stop + public_transport=stop_position 합산
-  const query = `[out:json][timeout:8];(node["highway"="bus_stop"](around:${radiusM},${lat},${lng});node["public_transport"="stop_position"](around:${radiusM},${lat},${lng}););out;`;
+  const params = new URLSearchParams({
+    serviceKey: SERVICE_KEY,
+    gpsLati:    String(lat),
+    gpsLong:    String(lng),
+    numOfRows:  "30",
+    pageNo:     "1",
+    _type:      "json",
+  });
 
   try {
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      body: query,
-      signal: AbortSignal.timeout(8000),
-    });
+    const res = await fetch(
+      `https://apis.data.go.kr/1613000/BusSttnInfoInqireService/getCrdntPrxmtSttnList?${params}`,
+      { signal: AbortSignal.timeout(6000) }
+    );
     if (!res.ok) return [];
     const data = await res.json();
-    const elements: Record<string, unknown>[] = data.elements ?? [];
+    const body = data.response?.body;
+    if (!body || body.totalCount === 0) return [];
+
+    const raw = body.items?.item;
+    const items: Record<string, unknown>[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
 
     const R = 6371000;
-    return elements
-      .filter((e) => typeof e.lat === "number" && typeof e.lon === "number")
-      .map((e) => {
-        const sLat = e.lat as number;
-        const sLng = e.lon as number;
+    return items
+      .filter((s) => s.gpslati && s.gpslong)
+      .map((s) => {
+        const sLat = parseFloat(String(s.gpslati));
+        const sLng = parseFloat(String(s.gpslong));
         const dLat = ((sLat - lat) * Math.PI) / 180;
         const dLng = ((sLng - lng) * Math.PI) / 180;
         const a =
@@ -123,16 +131,14 @@ export async function getBusStationsByPos(
           Math.cos((lat * Math.PI) / 180) * Math.cos((sLat * Math.PI) / 180) *
           Math.sin(dLng / 2) ** 2;
         const distanceM = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-        const tags = (e.tags ?? {}) as Record<string, string>;
         return {
-          stationId: parseInt(String(e.id ?? 0)),
-          stationName: tags.name ?? tags["name:ko"] ?? "버스정류장",
+          stationId: parseInt(String(s.nodeid ?? 0)),
+          stationName: String(s.nodenm ?? "버스정류장"),
           lat: sLat,
           lng: sLng,
           distanceM,
         };
       })
-      .filter((s) => s.distanceM <= radiusM)
       .sort((a, b) => a.distanceM - b.distanceM);
   } catch {
     return [];
