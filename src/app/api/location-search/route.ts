@@ -1,24 +1,59 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchDongBoundary } from "@/infrastructure/api/sgis-boundary-client";
 import { fetchSohoByBbox } from "@/infrastructure/api/soho-batch-client";
 import { generateGrid } from "@/domain/grid-generator";
 import { calcStaticScore } from "@/domain/pharmacy-static-scorer";
 import { getAgePopulationByRegion, getWorkersByRegion } from "@/infrastructure/api/sgis-client";
 import { fetchAptsByBjdCode } from "@/infrastructure/api/apt-client";
 
+// bbox 기반 폴리곤 생성
+function buildBboxPolygon(centerLat: number, centerLng: number, radiusM = 600) {
+  const mPerLat = 111320;
+  const mPerLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
+  const dLat = radiusM / mPerLat;
+  const dLng = radiusM / mPerLng;
+
+  const swLat = centerLat - dLat;
+  const swLng = centerLng - dLng;
+  const neLat = centerLat + dLat;
+  const neLng = centerLng + dLng;
+
+  const polygon: [number, number][] = [
+    [swLng, swLat],
+    [neLng, swLat],
+    [neLng, neLat],
+    [swLng, neLat],
+    [swLng, swLat],
+  ];
+  const areaM2 = Math.PI * radiusM * radiusM;
+
+  return { polygon, areaM2, swLat, swLng, neLat, neLng };
+}
+
 export async function GET(req: NextRequest) {
   try {
-    const dong = req.nextUrl.searchParams.get("dong");
-    if (!dong) {
-      return NextResponse.json({ error: "동 이름을 입력해주세요" }, { status: 400 });
+    const sp = req.nextUrl.searchParams;
+    const dong = sp.get("dong");
+    const latParam = sp.get("lat");
+    const lngParam = sp.get("lng");
+    const admCd = sp.get("admCd") ?? "";
+    const sido = sp.get("sido") ?? "";
+    const sigungu = sp.get("sigungu") ?? "";
+
+    if (!dong || !latParam || !lngParam) {
+      return NextResponse.json({ error: "dong, lat, lng 파라미터가 필요합니다" }, { status: 400 });
     }
 
+    const centerLat = parseFloat(latParam);
+    const centerLng = parseFloat(lngParam);
+
+    // 캐시 키: admCd가 있으면 그걸로, 없으면 동이름+좌표
+    const cacheKey = admCd || `${dong}_${centerLat.toFixed(4)}_${centerLng.toFixed(4)}`;
+
     // 1. 캐시 확인
-    const cached = await prisma.locationSearchCache.findUnique({ where: { dongName: dong } });
+    const cached = await prisma.locationSearchCache.findUnique({ where: { dongName: cacheKey } });
     if (cached) {
       const phase1 = JSON.parse(cached.phase1);
-      // 캐시된 1차 결과 반환 (2차는 별도 API로)
       return NextResponse.json({
         dong: phase1.dong,
         phase1: phase1.grids,
@@ -26,29 +61,25 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 2. 동 경계 DB 조회 또는 API 수집
-    let dongBoundary = await prisma.dongBoundary.findFirst({ where: { dongName: dong } });
+    // 2. 동 경계 DB 조회 또는 생성
+    let dongBoundary = await prisma.dongBoundary.findFirst({ where: { admCd } });
 
     if (!dongBoundary) {
-      const boundary = await fetchDongBoundary(dong);
-      if (!boundary) {
-        return NextResponse.json({ error: `"${dong}"의 경계 정보를 찾을 수 없습니다` }, { status: 404 });
-      }
-
+      const bbox = buildBboxPolygon(centerLat, centerLng);
       dongBoundary = await prisma.dongBoundary.create({
         data: {
-          dongName: boundary.dongName,
-          sido: boundary.sido,
-          sigungu: boundary.sigungu,
-          admCd: boundary.admCd,
-          bboxSwLat: boundary.bboxSwLat,
-          bboxSwLng: boundary.bboxSwLng,
-          bboxNeLat: boundary.bboxNeLat,
-          bboxNeLng: boundary.bboxNeLng,
-          centerLat: boundary.centerLat,
-          centerLng: boundary.centerLng,
-          areaM2: boundary.areaM2,
-          polygon: JSON.stringify(boundary.polygon),
+          dongName: dong,
+          sido,
+          sigungu,
+          admCd,
+          bboxSwLat: bbox.swLat,
+          bboxSwLng: bbox.swLng,
+          bboxNeLat: bbox.neLat,
+          bboxNeLng: bbox.neLng,
+          centerLat,
+          centerLng,
+          areaM2: bbox.areaM2,
+          polygon: JSON.stringify(bbox.polygon),
         },
       });
     }
@@ -56,18 +87,18 @@ export async function GET(req: NextRequest) {
     const polygon: [number, number][] = JSON.parse(dongBoundary.polygon);
 
     // 3. 인구 데이터 DB 조회 또는 API 수집
-    let dongPop = await prisma.dongPopulation.findUnique({ where: { dongName: dong } });
+    let dongPop = await prisma.dongPopulation.findUnique({ where: { dongName: cacheKey } });
 
-    if (!dongPop) {
-      const admNm = `${dongBoundary.sido} ${dongBoundary.sigungu} ${dongBoundary.dongName}`;
+    if (!dongPop && admCd) {
+      const admNm = `${sido} ${sigungu} ${dong}`;
       const [agePop, workerStats] = await Promise.all([
-        getAgePopulationByRegion(dongBoundary.admCd, admNm).catch(() => null),
-        getWorkersByRegion(dongBoundary.admCd, admNm).catch(() => null),
+        getAgePopulationByRegion(admCd, admNm).catch(() => null),
+        getWorkersByRegion(admCd, admNm).catch(() => null),
       ]);
 
       dongPop = await prisma.dongPopulation.create({
         data: {
-          dongName: dong,
+          dongName: cacheKey,
           total: agePop?.total ?? 0,
           youngFamily: agePop?.youngFamily ?? 0,
           chronicPatient: agePop?.chronicPatient ?? 0,
@@ -79,8 +110,12 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    if (!dongPop) {
+      dongPop = { id: 0, dongName: cacheKey, total: 0, youngFamily: 0, chronicPatient: 0, youngFamilyRatio: 0, chronicPatientRatio: 0, workerCnt: 0, companyCnt: 0, fetchedAt: new Date() };
+    }
+
     // 4. POI DB 조회 또는 API 수집
-    let pois = await prisma.businessPOI.findMany({ where: { dongName: dong } });
+    let pois = await prisma.businessPOI.findMany({ where: { dongName: cacheKey } });
 
     if (pois.length === 0) {
       const batchPois = await fetchSohoByBbox(
@@ -91,10 +126,9 @@ export async function GET(req: NextRequest) {
       );
 
       if (batchPois.length > 0) {
-        // DB에 일괄 저장
         await prisma.businessPOI.createMany({
           data: batchPois.map(p => ({
-            dongName: dong,
+            dongName: cacheKey,
             bizesNm: p.bizesNm,
             category: p.category,
             lat: p.lat,
@@ -102,23 +136,21 @@ export async function GET(req: NextRequest) {
             isActive: true,
           })),
         });
-        pois = await prisma.businessPOI.findMany({ where: { dongName: dong } });
+        pois = await prisma.businessPOI.findMany({ where: { dongName: cacheKey } });
       }
     }
 
     // 5. 아파트 DB 조회 또는 API 수집
-    let aptComplexes = await prisma.aptComplex.findMany({ where: { dongName: dong } });
+    let aptComplexes = await prisma.aptComplex.findMany({ where: { dongName: cacheKey } });
     let totalAptHouseholds = 0;
 
-    if (aptComplexes.length === 0 && dongBoundary.admCd) {
-      // 법정동 코드 = admCd 앞 10자리 (B-type)
-      const bjdCode = dongBoundary.admCd;
-      const aptData = await fetchAptsByBjdCode(bjdCode).catch(() => null);
+    if (aptComplexes.length === 0 && admCd) {
+      const aptData = await fetchAptsByBjdCode(admCd).catch(() => null);
 
       if (aptData && aptData.items.length > 0) {
         await prisma.aptComplex.createMany({
           data: aptData.items.map(apt => ({
-            dongName: dong,
+            dongName: cacheKey,
             kaptCode: apt.kaptCode,
             kaptName: apt.kaptName,
             kaptAddr: apt.kaptAddr,
@@ -127,7 +159,7 @@ export async function GET(req: NextRequest) {
             lng: 0,
           })),
         });
-        aptComplexes = await prisma.aptComplex.findMany({ where: { dongName: dong } });
+        aptComplexes = await prisma.aptComplex.findMany({ where: { dongName: cacheKey } });
       }
     }
     totalAptHouseholds = aptComplexes.reduce((sum, a) => sum + a.households, 0);
@@ -188,10 +220,7 @@ export async function GET(req: NextRequest) {
           );
           if (!res.ok) return null;
           const data = await res.json();
-          return {
-            ...candidate,
-            footTraffic: data,
-          };
+          return { ...candidate, footTraffic: data };
         } catch {
           return { ...candidate, footTraffic: null };
         }
@@ -234,9 +263,9 @@ export async function GET(req: NextRequest) {
     };
 
     await prisma.locationSearchCache.upsert({
-      where: { dongName: dong },
+      where: { dongName: cacheKey },
       update: { phase1: JSON.stringify(cacheData), fetchedAt: new Date() },
-      create: { dongName: dong, phase1: JSON.stringify(cacheData) },
+      create: { dongName: cacheKey, phase1: JSON.stringify(cacheData) },
     });
 
     return NextResponse.json({
@@ -248,8 +277,6 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error("[location-search] Error:", error);
     const msg = error instanceof Error ? error.message : String(error);
-    const stack = error instanceof Error ? error.stack : "";
-    console.error("[location-search] Stack:", stack);
     return NextResponse.json(
       { error: "서버 오류가 발생했습니다", detail: msg },
       { status: 500 }

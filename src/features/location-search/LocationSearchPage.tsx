@@ -59,7 +59,19 @@ interface SearchResult {
   cached: boolean;
 }
 
-type Phase = "idle" | "loading" | "done";
+interface DongCandidate {
+  addressName: string;
+  bunjiAddress: string;
+  sido: string;
+  sigungu: string;
+  dongName: string;
+  admCd: string;
+  bjdCd: string;
+  centerLat: number;
+  centerLng: number;
+}
+
+type Phase = "idle" | "searching" | "selecting" | "loading" | "done";
 
 export default function LocationSearchPage() {
   const [query, setQuery] = useState("");
@@ -67,17 +79,59 @@ export default function LocationSearchPage() {
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [candidates, setCandidates] = useState<DongCandidate[]>([]);
 
+  // 1단계: 동 검색 → 후보 리스트
   const handleSearch = useCallback(async () => {
-    const dong = query.trim();
-    if (!dong) return;
+    const q = query.trim();
+    if (!q) return;
 
-    setPhase("loading");
+    setPhase("searching");
     setError(null);
     setResult(null);
+    setCandidates([]);
 
     try {
-      const res = await fetch(`/api/location-search?dong=${encodeURIComponent(dong)}`);
+      const res = await fetch(`/api/dong-search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+
+      if (data.candidates?.length === 0) {
+        setError(`"${q}"에 대한 검색 결과가 없습니다. 시/구/동을 함께 입력해보세요 (예: 강남구 역삼동)`);
+        setPhase("idle");
+        return;
+      }
+
+      if (data.candidates.length === 1) {
+        // 후보가 1개면 바로 분석
+        selectAndAnalyze(data.candidates[0]);
+        return;
+      }
+
+      // 여러 후보 → 선택 대기
+      setCandidates(data.candidates);
+      setPhase("selecting");
+    } catch {
+      setError("네트워크 오류가 발생했습니다");
+      setPhase("idle");
+    }
+  }, [query]);
+
+  // 2단계: 후보 선택 → 분석 실행
+  const selectAndAnalyze = useCallback(async (c: DongCandidate) => {
+    setPhase("loading");
+    setCandidates([]);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams({
+        dong: c.dongName,
+        lat: String(c.centerLat),
+        lng: String(c.centerLng),
+        admCd: c.admCd,
+        sido: c.sido,
+        sigungu: c.sigungu,
+      });
+      const res = await fetch(`/api/location-search?${params}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -92,10 +146,10 @@ export default function LocationSearchPage() {
       setError("네트워크 오류가 발생했습니다");
       setPhase("idle");
     }
-  }, [query]);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") handleSearch();
+    if (e.key === "Enter" && (phase === "idle" || phase === "selecting")) handleSearch();
   };
 
   // 히트맵 데이터를 KakaoMap용으로 변환 (최대 200개만 표시)
@@ -124,7 +178,7 @@ export default function LocationSearchPage() {
     : undefined;
 
   // 상세 분석이 있는 Top 5
-  const candidates = result?.phase2 ?? result?.phase1.top5 ?? [];
+  const topCandidates = result?.phase2 ?? result?.phase1.top5 ?? [];
 
   return (
     <div className="space-y-6">
@@ -143,19 +197,19 @@ export default function LocationSearchPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="동 이름 입력 (예: 고덕동)"
+            placeholder="동 이름 입력 (예: 고덕동, 강남구 역삼동)"
             className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
           />
         </div>
         <button
           onClick={handleSearch}
-          disabled={phase === "loading"}
+          disabled={phase === "searching" || phase === "loading"}
           className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
         >
-          {phase === "loading" ? (
+          {phase === "searching" || phase === "loading" ? (
             <>
               <Loader2 className="animate-spin" size={18} />
-              분석 중...
+              {phase === "searching" ? "검색 중..." : "분석 중..."}
             </>
           ) : (
             <>
@@ -165,6 +219,37 @@ export default function LocationSearchPage() {
           )}
         </button>
       </div>
+
+      {/* 동 후보 선택 */}
+      {phase === "selecting" && candidates.length > 0 && (
+        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+          <div className="px-4 py-2 bg-gray-750 border-b border-gray-700 text-xs text-gray-400">
+            {candidates.length}개의 동이 검색되었습니다. 분석할 동을 선택하세요.
+          </div>
+          <div className="max-h-60 overflow-y-auto">
+            {candidates.map((c, i) => (
+              <button
+                key={c.admCd}
+                onClick={() => selectAndAnalyze(c)}
+                className={clsx(
+                  "w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-700 transition-colors",
+                  i < candidates.length - 1 && "border-b border-gray-700/50"
+                )}
+              >
+                <MapPin size={16} className="text-blue-400 shrink-0" />
+                <div>
+                  <div className="text-white text-sm font-medium">
+                    {c.sido} {c.sigungu} {c.dongName}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {c.bunjiAddress || c.addressName}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 에러 */}
       {error && (
@@ -211,13 +296,13 @@ export default function LocationSearchPage() {
       )}
 
       {/* Top 5 후보 카드 */}
-      {candidates.length > 0 && (
+      {topCandidates.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <TrendingUp size={18} />
             최적 입지 Top 5
           </h2>
-          {candidates.map((candidate, idx) => (
+          {topCandidates.map((candidate, idx) => (
             <CandidateCard
               key={idx}
               rank={idx + 1}
