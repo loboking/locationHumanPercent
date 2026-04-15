@@ -247,8 +247,11 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("[location-search] Error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : "";
+    console.error("[location-search] Stack:", stack);
     return NextResponse.json(
-      { error: "서버 오류가 발생했습니다" },
+      { error: "서버 오류가 발생했습니다", detail: msg },
       { status: 500 }
     );
   }
