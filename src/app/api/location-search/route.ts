@@ -1,33 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { fetchDongBoundary, type DongBoundaryResult } from "@/infrastructure/api/sgis-boundary-client";
 import { fetchSohoByBbox } from "@/infrastructure/api/soho-batch-client";
 import { generateGrid } from "@/domain/grid-generator";
 import { calcStaticScore } from "@/domain/pharmacy-static-scorer";
 import { getAgePopulationByRegion, getWorkersByRegion } from "@/infrastructure/api/sgis-client";
 import { fetchAptsByBjdCode } from "@/infrastructure/api/apt-client";
 
-// bbox 기반 폴리곤 생성
-function buildBboxPolygon(centerLat: number, centerLng: number, radiusM = 600) {
+// fallback: bbox 기반 폴리곤
+function buildFallbackBoundary(
+  dongName: string, sido: string, sigungu: string, admCd: string,
+  centerLat: number, centerLng: number, radiusM = 1000
+): DongBoundaryResult {
   const mPerLat = 111320;
   const mPerLng = 111320 * Math.cos((centerLat * Math.PI) / 180);
   const dLat = radiusM / mPerLat;
   const dLng = radiusM / mPerLng;
 
-  const swLat = centerLat - dLat;
-  const swLng = centerLng - dLng;
-  const neLat = centerLat + dLat;
-  const neLng = centerLng + dLng;
+  const bboxSwLat = centerLat - dLat;
+  const bboxSwLng = centerLng - dLng;
+  const bboxNeLat = centerLat + dLat;
+  const bboxNeLng = centerLng + dLng;
 
   const polygon: [number, number][] = [
-    [swLng, swLat],
-    [neLng, swLat],
-    [neLng, neLat],
-    [swLng, neLat],
-    [swLng, swLat],
+    [bboxSwLng, bboxSwLat], [bboxNeLng, bboxSwLat],
+    [bboxNeLng, bboxNeLat], [bboxSwLng, bboxNeLat],
+    [bboxSwLng, bboxSwLat],
   ];
-  const areaM2 = Math.PI * radiusM * radiusM;
-
-  return { polygon, areaM2, swLat, swLng, neLat, neLng };
+  return { admCd, dongName, sido, sigungu, polygon, centerLat, centerLng, areaM2: Math.PI * radiusM * radiusM, bboxSwLat, bboxSwLng, bboxNeLat, bboxNeLng };
 }
 
 export async function GET(req: NextRequest) {
@@ -65,21 +65,24 @@ export async function GET(req: NextRequest) {
     let dongBoundary = await prisma.dongBoundary.findFirst({ where: { admCd } });
 
     if (!dongBoundary) {
-      const bbox = buildBboxPolygon(centerLat, centerLng);
+      // SGIS에서 실제 행정동 경계 가져오기
+      const boundary = await fetchDongBoundary(dong, centerLat, centerLng, sido, sigungu, admCd)
+        ?? buildFallbackBoundary(dong, sido, sigungu, admCd, centerLat, centerLng);
+
       dongBoundary = await prisma.dongBoundary.create({
         data: {
           dongName: dong,
-          sido,
-          sigungu,
-          admCd,
-          bboxSwLat: bbox.swLat,
-          bboxSwLng: bbox.swLng,
-          bboxNeLat: bbox.neLat,
-          bboxNeLng: bbox.neLng,
-          centerLat,
-          centerLng,
-          areaM2: bbox.areaM2,
-          polygon: JSON.stringify(bbox.polygon),
+          sido: boundary.sido,
+          sigungu: boundary.sigungu,
+          admCd: boundary.admCd,
+          bboxSwLat: boundary.bboxSwLat,
+          bboxSwLng: boundary.bboxSwLng,
+          bboxNeLat: boundary.bboxNeLat,
+          bboxNeLng: boundary.bboxNeLng,
+          centerLat: boundary.centerLat,
+          centerLng: boundary.centerLng,
+          areaM2: boundary.areaM2,
+          polygon: JSON.stringify(boundary.polygon),
         },
       });
     }
