@@ -2,23 +2,24 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, BarChart2, MapPin, Bus, History, Settings } from "lucide-react";
+import { LayoutDashboard, BarChart2, Bus, History, Settings, Star, Crosshair } from "lucide-react";
 import clsx from "clsx";
 
 const NAV_ITEMS = [
   { href: "/", label: "대시보드", icon: LayoutDashboard },
-  { href: "/analytics/foottraffic", label: "유동인구", icon: BarChart2 },
-  { href: "/analytics/commerce", label: "상권", icon: MapPin },
+  { href: "/favorites", label: "즐겨찾기", icon: Star },
+  { href: "/location-search", label: "입지탐색", icon: Crosshair },
+  { href: "/analytics/foottraffic", label: "입지분석", icon: BarChart2 },
   { href: "/analytics/transport", label: "교통", icon: Bus },
-  { href: "/analytics/bus-history", label: "이력", icon: History },
   { href: "/settings", label: "설정", icon: Settings },
 ];
 
 // 데스크탑에서 보여줄 전체 메뉴
 const FULL_NAV_ITEMS = [
   { href: "/", label: "대시보드", icon: LayoutDashboard },
-  { href: "/analytics/foottraffic", label: "유동인구 추정", icon: BarChart2 },
-  { href: "/analytics/commerce", label: "상권 매출 분석", icon: MapPin },
+  { href: "/favorites", label: "즐겨찾기", icon: Star },
+  { href: "/location-search", label: "입지 탐색", icon: Crosshair },
+  { href: "/analytics/foottraffic", label: "입지 분석", icon: BarChart2 },
   { href: "/analytics/transport", label: "실시간 교통", icon: Bus },
   { href: "/analytics/bus-history", label: "교통량 이력", icon: History },
   { href: "/settings", label: "설정", icon: Settings },
@@ -32,8 +33,8 @@ export default function Sidebar() {
       {/* 데스크탑 사이드바 */}
       <aside className="hidden md:flex w-56 lg:w-64 min-h-screen bg-gray-900 text-white flex-col shrink-0">
         <div className="p-5 lg:p-6 border-b border-gray-700">
-          <h1 className="text-base lg:text-lg font-bold text-white">평택 부동산 인사이트</h1>
-          <p className="text-xs text-gray-400 mt-1">SaaS Analytics Platform</p>
+          <h1 className="text-base lg:text-lg font-bold text-white">상권분석 인사이트</h1>
+          <p className="text-xs text-gray-400 mt-1">Commercial Analytics Platform</p>
         </div>
 
         <nav className="flex-1 p-3 lg:p-4 space-y-1">

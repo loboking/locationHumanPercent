@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -19,4 +19,76 @@ model BusTrafficSnapshot {
   recordedAt  DateTime @default(now())
 
   @@index([stationId, recordedAt])
+}
+
+model DongBoundary {
+  id         Int      @id @default(autoincrement())
+  dongName   String   @unique
+  sido       String
+  sigungu    String
+  admCd      String
+  bboxSwLat  Float
+  bboxSwLng  Float
+  bboxNeLat  Float
+  bboxNeLng  Float
+  centerLat  Float
+  centerLng  Float
+  areaM2     Float    @default(0)
+  polygon    String   // GeoJSON [lng,lat][] JSON string
+  fetchedAt  DateTime @default(now())
+
+  @@index([dongName])
+}
+
+model BusinessPOI {
+  id        Int      @id @default(autoincrement())
+  dongName  String
+  bizesNm   String
+  category  String   // restaurant, cafe, convenience, pharmacy, hospital, etc.
+  lat       Float
+  lng       Float
+  isActive  Boolean  @default(true)
+  fetchedAt DateTime @default(now())
+
+  @@index([dongName, category])
+  @@index([lat, lng])
+}
+
+model AptComplex {
+  id             Int      @id @default(autoincrement())
+  dongName       String
+  kaptCode       String
+  kaptName       String
+  kaptAddr       String
+  households     Int      @default(0)
+  lat            Float    @default(0)
+  lng            Float    @default(0)
+  fetchedAt      DateTime @default(now())
+
+  @@index([dongName])
+  @@index([lat, lng])
+}
+
+model DongPopulation {
+  id                 Int      @id @default(autoincrement())
+  dongName           String   @unique
+  total              Int      @default(0)
+  youngFamily        Int      @default(0)
+  chronicPatient     Int      @default(0)
+  youngFamilyRatio   Float    @default(0)
+  chronicPatientRatio Float   @default(0)
+  workerCnt          Int      @default(0)
+  companyCnt         Int      @default(0)
+  fetchedAt          DateTime @default(now())
+
+  @@index([dongName])
+}
+
+model LocationSearchCache {
+  id        Int      @id @default(autoincrement())
+  dongName  String   @unique
+  phase1    String   // JSON: grid scores + heatmap data
+  fetchedAt DateTime @default(now())
+
+  @@index([dongName])
 }
